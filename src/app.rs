@@ -1,15 +1,24 @@
+
+
 use iced::{Length, Theme};
 use iced::widget::{Column, Container, Row};
 use crate::screens::{login_screen, register_screen, profile_screen, settings_screen, nav_menu};
 use std::fs;
+use iced_aw::date_picker::Date;
 use serde::{Deserialize, Serialize};
+use rusqlite::{params, Connection};
+use sha2::{Sha256, Digest};
+use crate::db;
 use crate::screens::settings::theme_to_str;
 
 const CONFIG_FILE: &str = "config.json";
 //#[derive(Default)]
 pub struct App {
-    pub value: i64,
+    pub date: Date,
+    pub show_picker: bool,
+    //
     pub current_screen: Screen,
+    //
     pub user_name: String,
     pub user_surname: String,
     pub user_patronymic: String,
@@ -17,7 +26,13 @@ pub struct App {
     pub user_phone: String,
     pub user_password: String,
     pub user_password_repeat: String,
+    //
     pub theme: Theme,
+    //
+    pub register_error: Option<String>,
+    pub registration_success: bool,
+    pub logged_in_user: String,
+    pub user_birthday: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -50,12 +65,18 @@ pub enum Message {
     GoToSettings,
     Logout,
     ThemeSelected(&'static str),
+    ChooseDate,
+    SubmitDate(Date),
+    CancelDate,
+    Er(String),
 }
 impl Default for App {
     fn default() -> Self {
         let selected_theme = load_theme().unwrap_or(Theme::Light);
         Self {
-            value: 0,
+            user_birthday: "".to_string(),
+            date: Date::today(),
+            show_picker: false,
             current_screen: Default::default(),
             user_name: "".to_string(),
             user_surname: "".to_string(),
@@ -65,7 +86,9 @@ impl Default for App {
             user_password: "".to_string(),
             user_password_repeat: "".to_string(),
             theme: selected_theme,
-
+            register_error: None,
+            registration_success: false,
+            logged_in_user: "".to_string(),
         }
     }
 }
@@ -73,9 +96,15 @@ impl App {
     pub fn update(&mut self, message: Message) {
         match message {
             Message::LoginPressed => {
-                if self.user_email == "root" && self.user_password == "1234" {
-                    self.value = 1;
+                let conn = Connection::open("db_platform").unwrap();
+                let entered_hash = hash_password(&self.user_password);
+
+                if let Some(name) = db::check_user_credentials(&conn, &self.user_email, &entered_hash) {
+                    self.logged_in_user = name;
                     self.current_screen = Screen::Profile;
+                    self.clear_fields();
+                } else {
+                    // Ошибка: неверные учетные данные
                 }
             }
             Message::SwitchToLogin => {
@@ -94,21 +123,56 @@ impl App {
             Message::PasswordChanged(v) => self.user_password = v,
             Message::PasswordRepeatChanged(v) => self.user_password_repeat = v,
             Message::RegisterPressed => {
-                // Добавить логику регистрации
-            },
+                if self.user_password != self.user_password_repeat {
+                    self.register_error = Some("Пароли не совпадают".to_string());
+                    return;
+                }
+
+                let full_name = format!("{} {} {}", self.user_surname, self.user_name, self.user_patronymic);
+                let password_hash = hash_password(&self.user_password);
+
+                let conn = Connection::open("db_platform").unwrap();
+
+                // Используем функцию для регистрации пользователя
+                if let Err(_) = db::register_user(&conn, 
+                                                  &full_name, 
+                                                  format!("{:02}.{:02}.{}", &self.date.day, &self.date.month, &self.date.year).as_str(), 
+                                                  &self.user_email, 
+                                                  &password_hash) {
+                    self.register_error = Some("Ошибка регистрации".to_string());
+                } else {
+                    self.register_error = None;
+                    self.registration_success = true;
+                    self.logged_in_user = full_name;
+                    self.current_screen = Screen::Profile;
+                    self.clear_fields();
+                }
+            }
             Message::GoToProfile => self.current_screen = Screen::Profile,
             Message::GoToSettings => self.current_screen = Screen::Settings,
             Message::Logout => {
                 self.clear_fields();
                 self.current_screen = Screen::Login;
-            },
+            }
             Message::ThemeSelected(name) => {
                 if let Some(theme) = theme_from_str(name) {
                     let _ = save_theme(&theme);
                     self.theme= theme;
                 }
-            },
-            
+            }
+            Message::ChooseDate => {
+                self.show_picker = true;
+            }
+            Message::SubmitDate(date) => {
+                self.date = date;
+                self.show_picker = false;
+            }
+            Message::CancelDate => {
+                self.show_picker = false;
+            }
+            Message::Er(v) => {
+                
+            }
         }
     }
 
@@ -149,6 +213,8 @@ impl App {
         self.user_phone.clear();
         self.user_password.clear();
         self.user_password_repeat.clear();
+        self.register_error = None;
+        self.registration_success = false;
     }
     
 
@@ -174,4 +240,9 @@ pub fn load_theme() -> Option<Theme> {
     let contents = fs::read_to_string(CONFIG_FILE).ok()?;
     let config: Config = serde_json::from_str(&contents).ok()?;
     theme_from_str(&config.theme_name)
+}
+fn hash_password(password: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(password);
+    format!("{:x}", hasher.finalize())
 }

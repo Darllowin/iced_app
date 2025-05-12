@@ -1,10 +1,12 @@
 use iced::{widget::{column, text, text_input, button, vertical_space, Container}, Length, Alignment, Center};
+use iced::widget::{Button, Text};
+use iced_aw::{date_picker};
 use crate::app::{App, Message};
 
 pub fn register_screen(app: &App) -> Container<Message> {
+    let but = Button::new(Text::new("Дата рождения")).on_press(Message::ChooseDate);
     let content = column![
         text("Регистрация").size(30),
-        //vertical_space(),
         text_input("Имя", &app.user_name)
             .on_input(Message::FirstNameChanged)
             .padding(10)
@@ -21,8 +23,9 @@ pub fn register_screen(app: &App) -> Container<Message> {
             .size(18)
             .width(Length::Fixed(350.0)),
         vertical_space(),
-        text_input("Телефон", &app.user_phone)
-            .on_input(Message::PhoneChanged)
+        date_picker(app.show_picker, app.date, but, Message::CancelDate, Message::SubmitDate),
+        text_input("Date", &app.date.to_string())
+            .on_input(Message::Er)
             .padding(10)
             .size(18)
             .width(Length::Fixed(350.0)),
