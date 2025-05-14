@@ -1,4 +1,4 @@
-use iced::{widget::{column, text, text_input, button, vertical_space, Container}, Length, Alignment, Center};
+use iced::{widget::{column, text, text_input, button, vertical_space, Container}, Length, Alignment, Center, Theme};
 use crate::app::{App, Message};
 
 pub fn login_screen(app: &App) -> Container<Message> {
@@ -17,13 +17,12 @@ pub fn login_screen(app: &App) -> Container<Message> {
             .width(Length::Fixed(350.0)),
         button("Войти")
             .on_press(Message::LoginPressed)
-            .padding(10)
-            .width(Length::Fixed(200.0)),
+            .padding(10),
+        text(&app.error_message).size(20),
         vertical_space(),
         button("Регистрация")
             .on_press(Message::SwitchToRegister)
-            .padding(10)
-            .width(Length::Fixed(200.0)),
+            .padding(10),
     ]
         .spacing(15)
         .width(Length::Fill)

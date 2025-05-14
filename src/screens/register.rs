@@ -1,5 +1,5 @@
-use iced::{widget::{column, text, text_input, button, vertical_space, Container}, Length, Alignment, Center};
-use iced::widget::{Button, Text};
+use iced::{widget::{column, text, text_input, button, vertical_space, Container}, Length, Center};
+use iced::widget::{row, Button, Text};
 use iced_aw::{date_picker};
 use crate::app::{App, Message};
 
@@ -23,12 +23,17 @@ pub fn register_screen(app: &App) -> Container<Message> {
             .size(18)
             .width(Length::Fixed(350.0)),
         vertical_space(),
-        date_picker(app.show_picker, app.date, but, Message::CancelDate, Message::SubmitDate),
-        text_input("Date", &app.date.to_string())
-            .on_input(Message::Er)
-            .padding(10)
-            .size(18)
-            .width(Length::Fixed(350.0)),
+        row![
+            text_input("Date", &app.date.to_string())
+                .on_input(Message::Er)
+                .padding(10)
+                .size(18)
+                .width(Length::Fixed(200.0)), 
+            date_picker(app.show_picker, app.date, but, Message::CancelDate, Message::SubmitDate),
+        ]
+            .spacing(10)
+            .align_y(Center),
+        
         text_input("Почта", &app.user_email)
             .on_input(Message::EmailChanged)
             .padding(10)
@@ -47,13 +52,11 @@ pub fn register_screen(app: &App) -> Container<Message> {
             .width(Length::Fixed(350.0)),
         button("Зарегистрироваться")
             .on_press(Message::RegisterPressed)
-            .padding(10)
-            .width(Length::Fixed(200.0)),
+            .padding(10),
         vertical_space(),
         button("Назад ко входу")
             .on_press(Message::SwitchToLogin)
-            .padding(10)
-            .width(Length::Fixed(200.0)),
+            .padding(10),
     ]
         .spacing(15)
         .width(Length::Fill)
