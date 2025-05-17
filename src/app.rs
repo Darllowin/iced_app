@@ -1,9 +1,10 @@
 use iced::{Length, Theme};
 use iced::widget::{Column, Container, Row};
-use crate::screens::{login_screen, register_screen, profile_screen, settings_screen, nav_menu, courses_screen};
+use crate::screens::{login_screen, register_screen, profile_screen, settings_screen, nav_menu, courses_screen, user_list_screen, groups_screen};
 use std::fs;
 use std::str::FromStr;
 use iced_aw::date_picker::Date;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use rusqlite::{Connection};
 use sha2::{Sha256, Digest};
@@ -11,6 +12,7 @@ use crate::db;
 use crate::screens::settings::theme_to_str;
 
 const CONFIG_FILE: &str = "config.json";
+pub const DEFAULF_AVATAR: &str = "default_avatar.jpg";
 
 pub struct App {
     pub date: Date,
@@ -47,8 +49,54 @@ pub struct App {
     pub edit_course_description: String,
     pub edit_course_instructor: Option<String>,
     pub edit_course_level: Level,
+    //
+    pub editing_user: Option<UserInfo>,
+    pub edit_user_error: Option<String>,
+    pub show_edit_user_modal: bool,
+    pub edit_user_name: String,
+    pub edit_user_email: String,
+    pub edit_user_birthday: String,
+    pub edit_user_type: String,
+    //
+    pub course_filter_text: String,
+    // Группы
+    pub show_add_group_modal: bool,
+    pub new_group_name: String,
+    pub new_group_course: Option<String>,
+    pub new_group_teacher: Option<String>,
+
+    pub editing_group: Option<Group>,
+    pub edit_group_name: String,
+    pub edit_group_course: Option<String>,
+    pub edit_group_teacher: Option<String>,
+
+    pub group_filter_text: String,
+
+    pub selected_group_id: Option<i32>,
+    pub is_manage_students_modal_open: bool,
+    pub group_students: Vec<String>,
+    pub all_students: Vec<String>,
+    pub selected_student_to_add: Option<String>,
     
 }
+
+#[derive(Debug, Clone)]
+pub struct UserInfo {
+    pub name: String,
+    pub email: String,
+    pub birthday: String,
+    pub user_type: String,
+    pub avatar_data: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Group {
+    pub id: i32,
+    pub name: String,
+    pub course: Option<String>,
+    pub teacher: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Course {
     pub id: i32,
@@ -82,7 +130,7 @@ impl std::fmt::Display for Level {
     }
 }
 
-impl std::str::FromStr for Level {
+impl FromStr for Level {
     type Err = ();
 
     fn from_str(input: &str) -> Result<Level, Self::Err> {
@@ -106,6 +154,8 @@ pub enum Screen {
     Profile,
     Settings,
     Courses,
+    UserList,
+    GroupList,
 }
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -124,6 +174,8 @@ pub enum Message {
     GoToProfile,
     GoToSettings,
     GoToCourses,
+    GoToUserList,
+    GoToGroupList,
     Logout,
     //
     ThemeSelected(&'static str),
@@ -134,7 +186,6 @@ pub enum Message {
     Er(String),
     //
     ChooseAvatar,
-    //AvatarSelected(Option<String>),
     //
     NewCourseInstructorChanged(Option<String>),
     NewCourseLevelChanged(Level),
@@ -151,6 +202,39 @@ pub enum Message {
     EditCourseLevelChanged(Level),
     SubmitEditedCourse,
     CancelEditingCourse,
+    // Редактирование пользователя
+    StartEditingUser(UserInfo),
+    CancelEditingUser,
+    SubmitEditedUser,
+    DeleteUser(String),
+    EditUserNameChanged(String),
+    EditUserEmailChanged(String),
+    EditUserBirthdayChanged(String),
+    EditUserTypeChanged(String),
+    //
+    CourseFilterChanged(String),
+    // Для групп
+    ToggleAddGroupModal(bool),
+    NewGroupNameChanged(String),
+    NewGroupCourseChanged(Option<String>),
+    NewGroupTeacherChanged(Option<String>),
+
+    EditGroupNameChanged(String),
+    EditGroupCourseChanged(Option<String>),
+    EditGroupTeacherChanged(Option<String>),
+
+    SubmitNewGroup,
+    SubmitEditedGroup,
+    StartEditingGroup(Group),
+    CancelEditingGroup,
+    DeleteGroup(i32),
+    GroupFilterChanged(String),
+
+    OpenManageStudentsModal(i32),
+    CloseManageStudentsModal,
+    StudentToAddSelected(Option<String>),
+    AddStudent,
+    RemoveStudent(String),
 }
 impl Default for App {
     fn default() -> Self {
@@ -170,7 +254,6 @@ impl Default for App {
             register_error: None,
             registration_success: false,
             logged_in_user: "".to_string(),
-            //user_avatar_path: None,
             show_add_course_modal: false,
             new_course_title: "".to_string(),
             user_birthday: "".to_string(),
@@ -184,6 +267,28 @@ impl Default for App {
             edit_course_instructor: None,
             user_avatar_data: None,
             edit_course_level: Level::Beginner,
+            editing_user: None,
+            edit_user_error: None,
+            show_edit_user_modal: false,
+            edit_user_name: "".to_string(),
+            edit_user_email: "".to_string(),
+            edit_user_birthday: "".to_string(),
+            edit_user_type: "".to_string(),
+            course_filter_text: "".to_string(),
+            show_add_group_modal: false,
+            new_group_name: "".to_string(),
+            new_group_course: None,
+            new_group_teacher: None,
+            editing_group: None,
+            edit_group_name: "".to_string(),
+            edit_group_course: None,
+            edit_group_teacher: None,
+            group_filter_text: "".to_string(),
+            selected_group_id: None,
+            is_manage_students_modal_open: false,
+            group_students: vec![],
+            all_students: vec![],
+            selected_student_to_add: None,
         }
     }
 }
@@ -234,28 +339,119 @@ impl App {
             Message::PasswordChanged(v) => self.user_password = v,
             Message::PasswordRepeatChanged(v) => self.user_password_repeat = v,
             Message::RegisterPressed => {
+                // Проверка пустых полей ФИО
+                if self.user_name.trim().is_empty() || self.user_surname.trim().is_empty() || self.user_patronymic.trim().is_empty() {
+                    self.register_error = Some("Пожалуйста, заполните Фамилию, Имя и Отчество".to_string());
+                    return;
+                }
+
+                // Проверка ФИО: только русские буквы, пробелы и дефисы
+                let fio_re = Regex::new(r"^[А-Яа-яЁё\s-]+$").unwrap();
+                if !fio_re.is_match(&self.user_name) || !fio_re.is_match(&self.user_surname) || !fio_re.is_match(&self.user_patronymic) {
+                    self.register_error = Some("ФИО может содержать только русские буквы, пробелы и дефисы".to_string());
+                    return;
+                }
+
+                // Проверка паролей на пустоту
+                if self.user_password.trim().is_empty() || self.user_password_repeat.trim().is_empty() {
+                    self.register_error = Some("Пароль не может быть пустым".to_string());
+                    return;
+                }
+
+                // Проверка совпадения паролей
                 if self.user_password != self.user_password_repeat {
                     self.register_error = Some("Пароли не совпадают".to_string());
                     return;
                 }
 
+                let password = &self.user_password;
+
+                // Проверка длины
+                if password.len() < 8 {
+                    self.register_error = Some("Пароль должен содержать минимум 8 символов".to_string());
+                    return;
+                }
+
+                // Проверка наличия хотя бы одной заглавной буквы
+                let has_uppercase = password.chars().any(|c| c.is_ascii_uppercase());
+                if !has_uppercase {
+                    self.register_error = Some("Пароль должен содержать хотя бы одну заглавную букву".to_string());
+                    return;
+                }
+
+                // Проверка наличия хотя бы одной цифры
+                let has_digit = password.chars().any(|c| c.is_ascii_digit());
+                if !has_digit {
+                    self.register_error = Some("Пароль должен содержать хотя бы одну цифру".to_string());
+                    return;
+                }
+
+                // Далее — твоя существующая проверка email:
+                let email = self.user_email.trim();
+
+                if email.is_empty() {
+                    self.register_error = Some("Email не может быть пустым.".to_string());
+                    return;
+                }
+                if !email.contains('@') {
+                    self.register_error = Some("Email должен содержать символ '@'.".to_string());
+                    return;
+                }
+                let parts: Vec<&str> = email.split('@').collect();
+                if parts.len() != 2 {
+                    self.register_error = Some("Email должен содержать только один символ '@'.".to_string());
+                    return;
+                }
+                if parts[0].is_empty() {
+                    self.register_error = Some("Email должен содержать имя пользователя перед '@'.".to_string());
+                    return;
+                }
+                if parts[1].is_empty() {
+                    self.register_error = Some("Email должен содержать домен после '@'.".to_string());
+                    return;
+                }
+                if !parts[1].contains('.') {
+                    self.register_error = Some("Домен email должен содержать хотя бы одну точку (например: example.com).".to_string());
+                    return;
+                }
+                let email_re = Regex::new(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$").unwrap();
+                if !email_re.is_match(email) {
+                    self.register_error = Some("Email содержит недопустимые символы или некорректный формат.".to_string());
+                    return;
+                }
+
+                // Проверка уникальности email
+                let conn = Connection::open("db_platform").unwrap();
+                match db::is_email_taken(&conn, email) {
+                    Ok(true) => {
+                        self.register_error = Some("Пользователь с таким email уже существует.".to_string());
+                        return;
+                    }
+                    Ok(false) => {}
+                    Err(err) => {
+                        self.register_error = Some(format!("Ошибка при проверке email: {}", err));
+                        return;
+                    }
+                }
+
+                // Если все проверки пройдены — регистрируем пользователя
                 let full_name = format!("{} {} {}", self.user_surname, self.user_name, self.user_patronymic);
                 let password_hash = hash_password(&self.user_password);
 
-                let conn = Connection::open("db_platform").unwrap();
-
-                // Используем функцию для регистрации пользователя
-                if let Err(_) = db::register_user(&conn,
-                                                  &full_name,
-                                                  format!("{:02}.{:02}.{}", &self.date.day, &self.date.month, &self.date.year).as_str(),
-                                                  &self.user_email,
-                                                  &password_hash) {
-                    self.register_error = Some("Ошибка регистрации".to_string());
+                if let Err(_) = db::register_user(
+                    &conn,
+                    &full_name,
+                    format!("{:02}.{:02}.{}", self.date.day, self.date.month, self.date.year).as_str(),
+                    email,
+                    &password_hash,
+                ) {
+                    self.register_error = Some("Ошибка при сохранении пользователя в базу данных.".to_string());
                 } else {
                     self.register_error = None;
                     self.registration_success = true;
                     self.type_user = "student".to_string();
                     self.user_avatar_data = None;
+                    self.user_email = email.to_string();
                     self.logged_in_user = full_name;
                     self.current_screen = Screen::Profile;
                     self.clear_fields();
@@ -264,6 +460,8 @@ impl App {
             Message::GoToProfile => self.current_screen = Screen::Profile,
             Message::GoToSettings => self.current_screen = Screen::Settings,
             Message::GoToCourses => self.current_screen = Screen::Courses,
+            Message::GoToUserList => self.current_screen = Screen::UserList,
+            Message::GoToGroupList => self.current_screen = Screen::GroupList,
             Message::Logout => {
                 self.clear_fields();
                 self.user_avatar_data = None;
@@ -286,7 +484,7 @@ impl App {
             Message::CancelDate => {
                 self.show_picker = false;
             }
-            Message::Er(v) => {
+            Message::Er(_v) => {
 
             }
             Message::ChooseAvatar => {
@@ -413,6 +611,217 @@ impl App {
                 self.edit_course_instructor = None;
                 self.edit_course_level = Level::Beginner;
             },
+            Message::StartEditingUser(user) => {
+                self.editing_user = Some(user.clone());
+                self.edit_user_name = user.name;
+                self.edit_user_email = user.email;
+                self.edit_user_birthday = user.birthday;
+                self.edit_user_type = user.user_type;
+                self.show_edit_user_modal = true;
+            }
+
+            Message::CancelEditingUser => {
+                self.editing_user = None;
+                self.show_edit_user_modal = false;
+                self.edit_user_name.clear();
+                self.edit_user_email.clear();
+                self.edit_user_birthday.clear();
+                self.edit_user_type.clear();
+            }
+
+            Message::EditUserNameChanged(value) => {
+                self.edit_user_name = value;
+            }
+
+            Message::EditUserEmailChanged(value) => {
+                self.edit_user_email = value;
+            }
+
+            Message::EditUserBirthdayChanged(value) => {
+                self.edit_user_birthday = value;
+            }
+
+            Message::EditUserTypeChanged(value) => {
+                self.edit_user_type = value;
+            }
+
+            Message::SubmitEditedUser => {
+                if let Some(ref original_user) = self.editing_user {
+                    let email = self.edit_user_email.trim();
+
+                    // Пошаговая валидация
+                    if email.is_empty() {
+                        self.edit_user_error = Some("Email не может быть пустым.".to_string());
+                        return;
+                    }
+                    if !email.contains('@') {
+                        self.edit_user_error = Some("Email должен содержать символ '@'.".to_string());
+                        return;
+                    }
+
+                    let parts: Vec<&str> = email.split('@').collect();
+                    if parts.len() != 2 {
+                        self.edit_user_error = Some("Email должен содержать только один символ '@'.".to_string());
+                        return;
+                    }
+
+                    if parts[0].is_empty() {
+                        self.edit_user_error = Some("Email должен содержать имя пользователя перед '@'.".to_string());
+                        return;
+                    }
+                    if parts[1].is_empty() {
+                        self.edit_user_error = Some("Email должен содержать домен после '@'.".to_string());
+                        return;
+                    }
+                    if !parts[1].contains('.') {
+                        self.edit_user_error = Some("Домен email должен содержать хотя бы одну точку (например: example.com).".to_string());
+                        return;
+                    }
+
+                    // Дополнительная проверка через регулярку (общая структура)
+                    let email_re = Regex::new(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$").unwrap();
+                    if !email_re.is_match(email) {
+                        self.edit_user_error = Some("Email содержит недопустимые символы или некорректный формат.".to_string());
+                        return;
+                    }
+
+                    let conn = Connection::open("db_platform").unwrap();
+
+                    match db::is_email_taken_except(&conn, email, &original_user.email) {
+                        Ok(true) => {
+                            self.edit_user_error = Some("Email уже используется другим пользователем.".to_string());
+                            return;
+                        }
+                        Ok(false) => {
+                            let _ = db::update_user(
+                                &conn,
+                                &original_user.email,
+                                &self.edit_user_name,
+                                email,
+                                &self.edit_user_birthday,
+                                &self.edit_user_type,
+                            );
+                            self.editing_user = None;
+                            self.show_edit_user_modal = false;
+                            self.edit_user_error = None;
+                        }
+                        Err(err) => {
+                            self.edit_user_error = Some(format!("Ошибка при проверке email: {}", err));
+                        }
+                    }
+                }
+            }
+
+            Message::DeleteUser(email) => {
+                let conn = Connection::open("db_platform").unwrap();
+                let _ = db::delete_user(&conn, &email);
+            }
+            Message::CourseFilterChanged(text) => {
+                self.course_filter_text = text;
+            }
+            Message::ToggleAddGroupModal(show) => {
+                if !show {
+                    self.new_group_name.clear();
+                    self.new_group_course = None;
+                    self.new_group_teacher = None;
+                }
+                self.show_add_group_modal = show;
+            }
+            Message::NewGroupNameChanged(name) => self.new_group_name = name,
+            Message::NewGroupCourseChanged(course) => self.new_group_course = course,
+            Message::NewGroupTeacherChanged(teacher) => self.new_group_teacher = teacher,
+
+            Message::EditGroupNameChanged(name) => self.edit_group_name = name,
+            Message::EditGroupCourseChanged(course) => self.edit_group_course = course,
+            Message::EditGroupTeacherChanged(teacher) => self.edit_group_teacher = teacher,
+
+            Message::StartEditingGroup(group) => {
+                self.editing_group = Some(group.clone());
+                self.edit_group_name = group.name.clone();
+                self.edit_group_course = group.course.clone();
+                self.edit_group_teacher = group.teacher.clone();
+                self.show_add_group_modal = true;
+            }
+            Message::CancelEditingGroup => {
+                self.editing_group = None;
+                self.edit_group_name.clear();
+                self.edit_group_course = None;
+                self.edit_group_teacher = None;
+                self.show_add_group_modal = false;
+            }
+            Message::SubmitNewGroup => {
+                let conn = Connection::open(".db_platform").unwrap();
+                if let (Some(course), Some(teacher)) = (self.new_group_course.clone(), self.new_group_teacher.clone()) {
+                    if let Err(err) = db::insert_group(&conn, &self.new_group_name, &course, &teacher) {
+                        eprintln!("Ошибка добавления группы: {:?}", err);
+                    }
+                }
+                self.new_group_name.clear();
+                self.new_group_course = None;
+                self.new_group_teacher = None;
+                self.show_add_group_modal = false;
+            }
+            Message::SubmitEditedGroup => {
+                if let Some(group) = self.editing_group.take() {
+                    let conn = Connection::open("db_platform").unwrap();
+                    if let (Some(course), Some(teacher)) = (self.edit_group_course.clone(), self.edit_group_teacher.clone()) {
+                        if let Err(err) = db::update_group(&conn, group.id, &self.edit_group_name, &course, &teacher) {
+                            eprintln!("Ошибка обновления группы: {:?}", err);
+                        }
+                    }
+                }
+                self.edit_group_name.clear();
+                self.edit_group_course = None;
+                self.edit_group_teacher = None;
+                self.show_add_group_modal = false;
+            }
+            Message::DeleteGroup(id) => {
+                let conn = Connection::open("db_platform").unwrap();
+                if let Err(err) = db::delete_group(&conn, id) {
+                    eprintln!("Ошибка удаления группы: {:?}", err);
+                }
+            }
+            Message::GroupFilterChanged(text) => self.group_filter_text = text,
+            Message::OpenManageStudentsModal(group_id) => {
+                let conn = Connection::open("db_platform").unwrap();
+                let students = db::get_students_for_group(&conn, group_id);
+                let all_students = db::get_all_student_names(&conn);
+
+                self.selected_group_id = Some(group_id);
+                self.is_manage_students_modal_open = true;
+                self.group_students = students.expect("REASON");
+                self.all_students = all_students.expect("REASON");
+                self.selected_student_to_add = None;
+            }
+            Message::CloseManageStudentsModal => {
+                self.is_manage_students_modal_open = false;
+                self.selected_group_id = None;
+                self.group_students.clear();
+                self.selected_student_to_add = None;
+            }
+
+            Message::StudentToAddSelected(student_opt) => {
+                self.selected_student_to_add = student_opt;
+            }
+
+            Message::AddStudent => {
+                let conn = Connection::open("db_platform").unwrap();
+                if let (Some(group_id), Some(student_name)) = (self.selected_group_id, &self.selected_student_to_add) {
+                    db::add_student_to_group(&conn, group_id, student_name).unwrap();
+                    self.group_students = db::get_students_for_group(&conn, group_id).expect("REASON");
+                    self.selected_student_to_add = None;
+                }
+            }
+
+            Message::RemoveStudent(student_name) => {
+                let conn = Connection::open("db_platform").unwrap();
+                if let Some(group_id) = self.selected_group_id {
+                    db::remove_student_from_group(&conn, group_id, &student_name).unwrap();
+                    self.group_students = db::get_students_for_group(&conn, group_id).expect("REASON");
+                }
+            }
+
+            
         }
     }
 
@@ -428,7 +837,7 @@ impl App {
                         .padding(10)
                 } else {
                     Container::new(Column::new()) // Пустой контейнер, если экран входа
-                        .width(Length::Fixed(0.0)) // Меню скрыто
+                        .width(Length::Fixed(0.0)) 
                         .height(Length::Fill)
                 }
             )
@@ -440,6 +849,8 @@ impl App {
                     Screen::Profile => profile_screen(self),
                     Screen::Settings => settings_screen(self),
                     Screen::Courses => courses_screen(self),
+                    Screen::UserList => user_list_screen(self),
+                    Screen::GroupList => groups_screen(self),
                 }
                     .width(Length::Fill),
             )

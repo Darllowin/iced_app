@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use iced::{widget::{column, text, button, Container}, Center, ContentFit, Length};
-use iced::widget::{image, row};
+use iced::widget::{image, row, TextInput};
+use iced::widget::container::bordered_box;
 use iced::widget::image::Handle;
 use crate::app::{App, Message};
 
@@ -14,13 +15,14 @@ pub fn profile_screen(app: &App) -> Container<Message> {
             .content_fit(ContentFit::Fill)
     } else {
         // Возвращаемся к аватару по умолчанию, если данные отсутствуют
-        image("default_avatar.png")
+        image("default_avatar.jpg")
             .width(Length::Fixed(120.0))
             .height(Length::Fixed(120.0))
             .content_fit(ContentFit::Cover)
     };
+    
     let content = column![
-        text("Профиль").size(30).align_x(Center).width(Length::Fill),
+        //text("Профиль").size(30).align_x(Center).width(Length::Fill),
         row![
             avatar_widget,
             column![
@@ -36,12 +38,12 @@ pub fn profile_screen(app: &App) -> Container<Message> {
         text(&app.error_message).size(10),
         button("Выбрать аватар").on_press(Message::ChooseAvatar),
     ]
-        .spacing(20)
-        .width(Length::Fill)
-        .height(Length::Fill);
+        .spacing(20);
 
-    Container::new(content)
+    let user_info_wigget = Container::new(content).style(move |_| bordered_box(&app.theme)).width(Length::Fill).padding(10);
+    Container::new(user_info_wigget)
         .width(Length::Fill)
         .height(Length::Fill)
-        .padding(40)
+        .padding(20)
+        
 }

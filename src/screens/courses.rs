@@ -3,6 +3,7 @@ use iced::{
     widget::{Button, Column, Container, Row, Stack, Text, TextInput, mouse_area, Scrollable},
     Alignment, Length
 };
+use iced::advanced::graphics::text::cosmic_text::Align;
 use iced::widget::container::{background, bordered_box};
 use iced::widget::{button, horizontal_space, row, text, PickList};
 use rusqlite::Connection;
@@ -25,7 +26,8 @@ fn content(course: Course, app: &App) -> Column<Message> {
         .push(Text::new(format!("Преподаватель: {}", course.instructor.unwrap_or(String::from("")))).size(24))
         .push(Text::new(format!("Уровень: {}", course.level.unwrap_or(String::from("")))).size(22))
         .push(Text::new(""))
-        .push(Text::new(format!("{}", course.description)).size(18));
+        .push(Text::new(format!("{}", course.description)).size(18))
+        .padding(10);
     
     Column::new().push(
         Container::new(content)
@@ -38,24 +40,43 @@ pub fn courses_screen(app: &App) -> Container<Message> {
     let courses = db::get_courses(&conn).unwrap_or_default();
     let instructors = db::get_all_users(&conn).unwrap_or_default();
 
+    let filter = app.course_filter_text.to_lowercase();
+    let filtered_courses: Vec<Course> = courses
+        .into_iter()
+        .filter(|c| {
+            c.title.to_lowercase().contains(&filter)
+                || c.description.to_lowercase().contains(&filter)
+                || c.instructor.clone().unwrap_or_default().to_lowercase().contains(&filter)
+                || c.level.clone().unwrap_or_default().to_lowercase().contains(&filter)
+        })
+        .collect();
+
     let mut courses_column = Column::new().spacing(20).padding(20);
 
-    courses_column = courses_column.push(
-        Button::new(Text::new("Добавить курс"))
-            .on_press(Message::ToggleAddCourseModal(true))
-            .width(Length::Shrink)
-    );
-
-    for course in courses {
+    courses_column = courses_column
+        .push(
+            Row::new()
+                .push(
+                    Button::new(Text::new("Добавить курс"))
+                        .on_press(Message::ToggleAddCourseModal(true))
+                )
+                .push(
+                    TextInput::new("Поиск по курсам...", &app.course_filter_text)
+                        .on_input(Message::CourseFilterChanged)
+                        .padding(10)
+                        .size(18)
+                        .width(Length::Fixed(400.0))
+            ).spacing(10).align_y(Alignment::Center)
+        );
+    
+    for course in filtered_courses {
         // Создаем контент карточки курса
         let course_content = Column::new().push(
             Container::new(
                 Column::new()
-                    .push(headrbar(course.clone()))
+                    .push(headrbar(course.clone()).padding(10))
                     .push(content(course, &app))
-                    .height(Length::Shrink)
             )
-                //.style(move |_| background(Color::default()))
                 .style(move |_| bordered_box(&app.theme))
                 .width(Length::Fill)
         );

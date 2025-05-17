@@ -50,6 +50,13 @@ pub fn register_screen(app: &App) -> Container<Message> {
             .padding(10)
             .size(18)
             .width(Length::Fixed(350.0)),
+        vertical_space(),
+        if let Some(err) = &app.register_error {
+            Text::new(err)
+                .size(16)
+        } else {
+            Text::new("")
+        },
         button("Зарегистрироваться")
             .on_press(Message::RegisterPressed)
             .padding(10),
