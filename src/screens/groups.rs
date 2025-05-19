@@ -1,15 +1,15 @@
-use iced::{widget::{Button, Column, Container, Row, Stack, Text, TextInput, mouse_area, Scrollable}, Alignment, Color, Length};
-use iced::widget::{button, horizontal_space, pick_list, row, text, vertical_space, PickList};
+use iced::{widget::{Button, Column, Container, Row, Stack, Text, TextInput, mouse_area, Scrollable}, Alignment, Color, ContentFit, Length};
+use iced::widget::{button, horizontal_space, image, row, text, Image, PickList};
 use iced::widget::container::{background, bordered_box};
 use rusqlite::Connection;
-use crate::app::{App, Group, Message};
+use crate::app::{App, Group, Message, DEFAULT_AVATAR};
 use crate::db;
 
 fn headerbar(group: Group) -> Row<'static, Message> {
     row![
         row![
             button("Редактировать").on_press(Message::StartEditingGroup(group.clone())),
-            button("Состав").on_press(Message::OpenManageStudentsModal(group.id)),     
+            button("Состав").on_press(Message::OpenManageStudentsModal(group.id)),
         ].spacing(10),
         
         horizontal_space(),
@@ -23,7 +23,8 @@ fn headerbar(group: Group) -> Row<'static, Message> {
 fn content(group: Group) -> Column<'static, Message> {
     let content = Column::new()
         .push(Text::new(format!("Курс: {}", group.course.clone().unwrap_or_default())).size(22))
-        .push(Text::new(format!("Преподаватель: {}", group.teacher.clone().unwrap_or_default())).size(22));
+        .push(Text::new(format!("Преподаватель: {}", group.teacher.clone().unwrap_or_default())).size(22))
+        .push(Text::new(format!("Количество студентов: {}", group.student_count.clone())).size(22));
 
     Column::new().push(
         Container::new(content)
@@ -37,6 +38,7 @@ pub fn groups_screen(app: &App) -> Container<Message> {
     let groups = db::get_groups(&conn).unwrap_or_default();
     let courses = db::get_courses(&conn).unwrap_or_default();
     let users = db::get_all_users(&conn).unwrap_or_default();
+    let students_without_group = db::get_students_without_group(&conn).unwrap_or_default();
 
     let filter = app.group_filter_text.to_lowercase();
     let filtered_groups: Vec<Group> = groups
@@ -70,9 +72,10 @@ pub fn groups_screen(app: &App) -> Container<Message> {
         let group_content = Column::new().push(
             Container::new(
                 Column::new()
-                    .push(headerbar(group.clone()).padding(10))
-                    .push(content(group))
+                    .push(Container::new(headerbar(group.clone()).padding(10)).style(move |_| bordered_box(&app.theme)))
+                    .push(Container::new(content(group)).style(move |_| bordered_box(&app.theme)))
             )
+                .padding(10)
                 .style(move |_| bordered_box(&app.theme))
                 .width(Length::Fill)
         );
@@ -100,22 +103,52 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                 .push(text("Студенты в группе").size(24))
                 .push(
                     Container::new(
-                        Column::with_children(
-                            app.group_students.iter().map(|name| {
-                                row![
-                                text(name).size(20),
-                                horizontal_space(),
-                                button("X").on_press(Message::RemoveStudent(name.clone()))
-                            ]
-                                    .width(Length::Fill)
-                                    .into() // преобразуем Row в Element
-                            }).collect::<Vec<_>>() // указываем тип, чтобы избежать ошибки компиляции
-                        ).width(Length::Fill)
-                    ).style(move |_| bordered_box(&app.theme))
+                        Scrollable::new(
+                            Column::with_children(
+                                app.group_students.iter().map(|student| {
+                                    let avatar = if let Some(mut data) = student.avatar_data.clone() {
+                                        data.extend_from_slice(student.email.as_bytes());
+                                        Image::new(image::Handle::from_bytes(data))
+                                            .width(100)
+                                            .height(100)
+                                            .content_fit(ContentFit::Fill)
+                                    } else {
+                                        Image::new(DEFAULT_AVATAR)
+                                            .width(100)
+                                            .height(100)
+                                            .content_fit(ContentFit::Fill)
+                                    };
+
+                                    row![
+                                        Container::new(avatar)
+                                            .padding(5)
+                                            .style(move |_| bordered_box(&app.theme)),
+                                        Container::new(
+                                            Column::new()
+                                                .push(text(format!("ФИО: {}", &student.name)).size(20))
+                                                .push(text(format!("Дата рождения: {}", &student.birthday)).size(20))
+                                                .push(text(format!("Email: {}", &student.email)).size(20))
+                                                .spacing(5)
+                                        ),
+                                        horizontal_space(),
+                                        button("X").on_press(Message::RemoveStudent(student.name.clone()))
+                                    ]
+                                        .spacing(10)
+                                        .width(Length::Fill)
+                                        .into()
+                                }).collect::<Vec<_>>()
+                            )
+                                .spacing(5)
+                                .padding(10)
+                        )
+                            .height(Length::Fixed(300.0)) // ограничь высоту для скролла
+                            .width(Length::Fill)
+                    )
+                        .style(move |_| bordered_box(&app.theme))
                 )
                 .push(
                     PickList::new(
-                        app.all_students.clone(),
+                        students_without_group.clone(),
                         app.selected_student_to_add.clone(),
                         |s| Message::StudentToAddSelected(Some(s))
                     ).placeholder("Выберите студента")
@@ -187,7 +220,8 @@ pub fn groups_screen(app: &App) -> Container<Message> {
         let modal = Container::new(modal_column)
             .style(move |_| bordered_box(&app.theme))
             .padding(20)
-            .width(Length::Fixed(600.0));
+            .height(Length::Fixed(500.0))
+            .width(Length::Fixed(800.0));
 
         let modal_overlay = Container::new(
             mouse_area(

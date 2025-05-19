@@ -1,7 +1,8 @@
 use iced::{Length, Theme};
 use iced::widget::{Column, Container, Row};
-use crate::screens::{login_screen, register_screen, profile_screen, settings_screen, nav_menu, courses_screen, user_list_screen, groups_screen};
-use std::fs;
+use crate::screens::{login_screen, register_screen, profile_screen, settings_screen, nav_menu,
+                     courses_screen, user_list_screen, groups_screen};
+use std::{fmt, fs};
 use std::str::FromStr;
 use iced_aw::date_picker::Date;
 use regex::Regex;
@@ -12,7 +13,7 @@ use crate::db;
 use crate::screens::settings::theme_to_str;
 
 const CONFIG_FILE: &str = "config.json";
-pub const DEFAULF_AVATAR: &str = "default_avatar.jpg";
+pub const DEFAULT_AVATAR: &str = "default_avatar.jpg";
 
 pub struct App {
     pub date: Date,
@@ -50,6 +51,13 @@ pub struct App {
     pub edit_course_instructor: Option<String>,
     pub edit_course_level: Level,
     //
+    pub show_lessons_modal: bool,             
+    pub editing_lessons_course: Option<Course>, 
+    pub course_lessons: Vec<Lesson>,          
+    pub new_lesson_number_text: String,       
+    pub new_lesson_title: String,
+    pub lesson_error_message: Option<String>,
+    //
     pub editing_user: Option<UserInfo>,
     pub edit_user_error: Option<String>,
     pub show_edit_user_modal: bool,
@@ -74,10 +82,33 @@ pub struct App {
 
     pub selected_group_id: Option<i32>,
     pub is_manage_students_modal_open: bool,
-    pub group_students: Vec<String>,
+    pub group_students: Vec<UserInfo>,
     pub all_students: Vec<String>,
     pub selected_student_to_add: Option<String>,
-    
+    pub user_group_name: Option<String>,
+    pub logged_in_user_id: Option<i32>,
+
+    pub show_children_modal: bool,
+    pub parent_children: Vec<UserInfo>,
+    pub available_children: Vec<UserInfo>,
+    pub selected_child_to_add: Option<UserInfo>,
+
+    pub show_course_details_modal: bool,
+    //pub course_modal_view: CourseModalView,
+    pub course_error_message: Option<String>, // Ошибки, специфичные для модалки курса
+
+    pub show_assignments_modal: bool,
+    pub current_lesson_for_assignments: Option<Lesson>,
+    pub lesson_assignments: Vec<Assignment>, // Если будете загружать задания
+    pub assignment_error_message: Option<String>,
+    // --- Поля для формы нового задания ---
+    pub new_assignment_title: String,
+    pub new_assignment_description: String,
+    pub new_assignment_type: Option<AssignmentType>, // Для текстового ввода типа
+
+    pub show_assignment_detail_modal: bool,
+    pub selected_assignment_for_detail: Option<Assignment>,
+
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +118,23 @@ pub struct UserInfo {
     pub birthday: String,
     pub user_type: String,
     pub avatar_data: Option<Vec<u8>>,
+    pub group: Option<String>,
+    pub child_count: Option<i32>,
+}
+
+// Для PickList:
+// Чтобы PickList мог отобразить пользователя
+impl fmt::Display for UserInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
+// Чтобы PickList мог сравнивать выбранный элемент
+impl PartialEq for UserInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.email == other.email
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -95,8 +143,63 @@ pub struct Group {
     pub name: String,
     pub course: Option<String>,
     pub teacher: Option<String>,
+    pub student_count: u8,
 }
 
+#[derive(Debug, Clone)]
+pub struct Lesson {
+    pub id: i32,
+    pub course_id: i32,
+    pub number: Option<i32>, // Номер может быть опциональным
+    pub title: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Assignment {
+    pub id: i32,
+    pub lesson_id: i32,
+    pub title: String,
+    pub description: String,
+    pub assignment_type: String, // В таблице колонка "type"
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] // Добавил Default
+pub enum AssignmentType {
+    #[default] // Задаем значение по умолчанию, если потребуется
+    Lecture,
+    Test,
+    Practice,
+    // Добавьте другие типы по необходимости
+}
+
+impl AssignmentType {
+    pub const ALL: &'static [AssignmentType] = &[
+        AssignmentType::Lecture,
+        AssignmentType::Test,
+        AssignmentType::Practice,
+    ];
+}
+
+// Реализация Display для отображения в PickList и преобразования в строку
+impl fmt::Display for AssignmentType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                AssignmentType::Lecture => "Лекция",
+                AssignmentType::Test => "Тест",
+                AssignmentType::Practice => "Практика",
+            }
+        )
+    }
+}
+
+impl PartialEq for Lesson {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id // Сравниваем по ID
+    }
+}
 #[derive(Debug, Clone)]
 pub struct Course {
     pub id: i32,
@@ -104,6 +207,7 @@ pub struct Course {
     pub description: String,
     pub instructor: Option<String>,
     pub level: Option<String>,
+    pub lesson_count: i32,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
@@ -120,7 +224,7 @@ impl Level {
     ];
 }
 
-impl std::fmt::Display for Level {
+impl fmt::Display for Level {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", match self {
             Level::Beginner => "Начальный",
@@ -153,7 +257,7 @@ pub enum Screen {
     Register,
     Profile,
     Settings,
-    Courses,
+    CoursesList,
     UserList,
     GroupList,
 }
@@ -235,6 +339,31 @@ pub enum Message {
     StudentToAddSelected(Option<String>),
     AddStudent,
     RemoveStudent(String),
+
+    ShowParentChildren(String), // email родителя
+    CloseParentChildrenModal,
+    DeleteChild { parent_email: String, child_email: String },
+    AddChildToParent,
+    SelectedChildToAddChanged(UserInfo),
+    ShowLessonsModal(Course), 
+    CloseLessonsModal,      
+    NewLessonNumberChanged(String), 
+    NewLessonTitleChanged(String),  
+    AddLesson,                
+    DeleteLesson(i32),
+
+    ShowAssignmentsModal(Lesson),
+    CloseAssignmentsModal,
+    // --- Сообщения для управления заданиями ---
+    NewAssignmentTitleChanged(String),
+    NewAssignmentDescriptionChanged(String),
+    NewAssignmentTypeSelected(AssignmentType), // Для текстового ввода типа
+    AddAssignment,
+    DeleteAssignment(i32), // передаем ID задания
+    
+    ShowAssignmentDetailModal(Assignment),
+    CloseAssignmentDetailModal,
+
 }
 impl Default for App {
     fn default() -> Self {
@@ -267,6 +396,12 @@ impl Default for App {
             edit_course_instructor: None,
             user_avatar_data: None,
             edit_course_level: Level::Beginner,
+            show_lessons_modal: false,
+            editing_lessons_course: None,
+            course_lessons: vec![],
+            new_lesson_number_text: "".to_string(),
+            new_lesson_title: "".to_string(),
+            lesson_error_message: None,
             editing_user: None,
             edit_user_error: None,
             show_edit_user_modal: false,
@@ -289,6 +424,23 @@ impl Default for App {
             group_students: vec![],
             all_students: vec![],
             selected_student_to_add: None,
+            user_group_name: None,
+            logged_in_user_id: None,
+            show_children_modal: false,
+            parent_children: vec![],
+            available_children: vec![],
+            selected_child_to_add: None,
+            show_course_details_modal: false,
+            course_error_message: None,
+            show_assignments_modal: false,
+            current_lesson_for_assignments: None,
+            lesson_assignments: vec![],
+            assignment_error_message: None,
+            new_assignment_title: "".to_string(),
+            new_assignment_description: "".to_string(),
+            show_assignment_detail_modal: false,
+            selected_assignment_for_detail: None,
+            new_assignment_type: None,
         }
     }
 }
@@ -306,6 +458,15 @@ impl App {
 
                 match db::check_user_credentials(&conn, &self.user_email, &entered_hash) {
                     Ok((name, avatar_data, birthday, type_user)) => {
+                        // Получаем ID пользователя
+                        if let Some(user_id) = db::get_user_id_by_email(&conn, &self.user_email) {
+                            self.logged_in_user_id = Some(user_id);
+                            self.user_group_name = db::get_user_group(&conn, user_id).unwrap_or(None);
+                        } else {
+                            self.error_message = "Ошибка получения ID пользователя.".to_string();
+                            return;
+                        }
+
                         self.logged_in_user = name;
                         self.user_birthday = birthday;
                         self.type_user = type_user;
@@ -454,12 +615,12 @@ impl App {
                     self.user_email = email.to_string();
                     self.logged_in_user = full_name;
                     self.current_screen = Screen::Profile;
-                    self.clear_fields();
+                    //self.clear_fields();
                 }
             }
             Message::GoToProfile => self.current_screen = Screen::Profile,
             Message::GoToSettings => self.current_screen = Screen::Settings,
-            Message::GoToCourses => self.current_screen = Screen::Courses,
+            Message::GoToCourses => self.current_screen = Screen::CoursesList,
             Message::GoToUserList => self.current_screen = Screen::UserList,
             Message::GoToGroupList => self.current_screen = Screen::GroupList,
             Message::Logout => {
@@ -584,7 +745,9 @@ impl App {
                         title: self.edit_course_title.clone(),
                         description: self.edit_course_description.clone(),
                         instructor: self.edit_course_instructor.clone(),
-                        level: Some(self.edit_course_level.to_string()),
+                        // Преобразование Level в Option<String>
+                        level: Some(self.edit_course_level.to_string()), // Убедитесь, что ваш enum Level реализует Display/ToString
+                        lesson_count: 0, // <-- Добавляем поле lesson_count со значением 0
                     };
 
                     if db::update_course(&conn, &updated_course).is_ok() {
@@ -820,8 +983,274 @@ impl App {
                     self.group_students = db::get_students_for_group(&conn, group_id).expect("REASON");
                 }
             }
+            Message::ShowParentChildren(parent_email) => {
+                // Лучше открыть соединение один раз в начале
+                let conn = Connection::open("db_platform").unwrap();
 
+                // Загрузка детей родителя
+                match db::get_children_for_parent(&conn, &parent_email) {
+                    Ok(children) => self.parent_children = children,
+                    Err(err) => {
+                        println!("Ошибка при получении детей родителя: {:?}", err);
+                        self.parent_children = vec![];
+                    }
+                }
+
+                // Загрузка доступных для добавления детей (для PickList)
+                match db::get_unassigned_children(&conn) {
+                    Ok(children) => self.available_children = children,
+                    Err(err) => { // Желательно логировать ошибку и здесь
+                        println!("Ошибка при получении неназначенных детей: {:?}", err);
+                        self.available_children.clear();
+                    }
+                }
+                
+                self.edit_user_email = parent_email;
+                // Только после загрузки данных и установки email, показываем модальное окно
+                self.show_children_modal = true;
+
+                // self.selected_child_to_add = None; // Возможно, стоит сбросить выбранного ребенка здесь
+            }
+
+
+            Message::CloseParentChildrenModal => {
+                self.show_children_modal = false;
+                self.parent_children.clear();
+            }
+            Message::DeleteChild { parent_email, child_email } => {
+                let conn = Connection::open("db_platform").unwrap();
+                if let Err(e) = db::delete_child_for_parent(&conn, &parent_email, &child_email) {
+                    println!("Ошибка при удалении ребенка: {:?}", e);
+                }
+                // Обновим список детей
+                match db::get_children_for_parent(&conn, &parent_email) {
+                    Ok(children) => self.parent_children = children,
+                    Err(_) => self.parent_children.clear(),
+                }
+                match db::get_unassigned_children(&conn) {
+                    Ok(children) => self.available_children = children,
+                    Err(err) => { // Желательно логировать ошибку и здесь
+                        println!("Ошибка при получении неназначенных детей: {:?}", err);
+                        self.available_children.clear();
+                    }
+                }
+            }
+            Message::AddChildToParent => {
+                let parent_email = self.edit_user_email.clone();
+
+                if let Some(child) = self.selected_child_to_add.clone() {
+                    println!("Attempting to add child with email: {} to parent with email: {}", child.email, parent_email);
+                    let conn = Connection::open("db_platform").unwrap();
+
+                    if let Err(e) = db::add_child_to_parent(&conn, &parent_email, &child.email) {
+                        println!("Ошибка при добавлении ребёнка: {}", e);
+                    } else {
+                        self.parent_children = db::get_children_for_parent(&conn, &parent_email).unwrap_or_default();
+                        self.available_children = db::get_unassigned_children(&conn).unwrap_or_default();
+                        self.selected_child_to_add = None;
+                    }
+                }
+            }
+            Message::SelectedChildToAddChanged(child) => {
+                self.selected_child_to_add = Some(child);
+            }
+            Message::ShowLessonsModal(course) => {
+                let conn = Connection::open("db_platform").unwrap(); // Открываем соединение
+                let course_id = course.id;
+                // Загружаем занятия для этого курса
+                match db::get_lessons_for_course(&conn, course_id) {
+                    Ok(lessons) => self.course_lessons = lessons,
+                    Err(e) => {
+                        println!("Ошибка при загрузке занятий курса {}: {:?}", course_id, e);
+                        self.course_lessons.clear(); // Очищаем список при ошибке
+                    }
+                }
+                // Сохраняем курс, для которого показываем занятия
+                self.editing_lessons_course = Some(course);
+                // Сбрасываем поля формы нового занятия
+                self.new_lesson_number_text = String::new();
+                self.new_lesson_title = String::new();
+                self.lesson_error_message = None;
+                // Показываем модалку
+                self.show_lessons_modal = true;
+            }
+            Message::CloseLessonsModal => {
+                // Скрываем модалку
+                self.show_lessons_modal = false;
+                // Очищаем состояние модалки занятий
+                self.editing_lessons_course = None;
+                self.course_lessons.clear();
+                self.new_lesson_number_text = String::new();
+                self.new_lesson_title = String::new();
+            }
+            Message::NewLessonNumberChanged(text) => {
+                self.new_lesson_number_text = text;
+            }
+            Message::NewLessonTitleChanged(text) => {
+                self.new_lesson_title = text;
+            }
+            Message::AddLesson => {
+                // Сбрасываем предыдущую ошибку
+                self.lesson_error_message = None; // <-- Сбрасываем ошибку в начале обработчика
+
+                // Проверяем, для какого курса добавляем занятие
+                if let Some(course) = &self.editing_lessons_course {
+                    let course_id = course.id;
+                    // Парсим номер занятия (может быть пустым или некорректным)
+                    let lesson_number = self.new_lesson_number_text.parse::<i32>().ok();
+                    let lesson_title = self.new_lesson_title.trim(); // <-- Обрезаем пробелы в названии
+
+                    // <-- ДОБАВЛЯЕМ ПРОВЕРКУ НА ПУСТОЕ НАЗВАНИЕ
+                    if lesson_title.is_empty() && lesson_number.is_none() {
+                        self.lesson_error_message = Some("Название занятия не может быть пустым.".to_string()); // <-- Устанавливаем сообщение об ошибке
+                        println!("Ошибка добавления занятия: Название не может быть пустым."); // Можно оставить для отладки
+                    }
+                    // <-- КОНЕЦ ПРОВЕРКИ НА ПУСТОЕ НАЗВАНИЕ
+
+                    let conn = Connection::open("db_platform").unwrap();
+                    // Добавляем занятие в БД
+                    match db::add_lesson(&conn, course_id, lesson_number, lesson_title) {
+                        Ok(_) => {
+                            println!("Занятие успешно добавлено.");
+                            // После успешного добавления:
+                            self.new_lesson_number_text.clear(); // <-- Очищаем поля
+                            self.new_lesson_title.clear();     // <-- Очищаем поля
+                            self.lesson_error_message = None; // <-- Убеждаемся, что ошибки нет
+
+                            // Обновить список занятий в модалке
+                            match db::get_lessons_for_course(&conn, course_id) {
+                                Ok(lessons) => self.course_lessons = lessons,
+                                Err(e) => println!("Ошибка при обновлении списка занятий: {:?}", e),
+                            }
+                        }
+                        Err(e) => {
+                            println!("Ошибка при добавлении занятия в БД: {:?}", e);
+                            self.lesson_error_message = Some(format!("Ошибка БД при добавлении занятия: {:?}", e)); // <-- Устанавливаем сообщение об ошибке БД
+                        }
+                    }
+                } else {
+                    println!("Ошибка: Не выбран курс для добавления занятия.");
+                    self.lesson_error_message = Some("Не выбран курс для добавления занятия.".to_string()); // <-- Устанавливаем сообщение об ошибке
+                }
+            }
+            Message::DeleteLesson(lesson_id) => {
+                // Проверяем, какой курс сейчас открыт
+                if let Some(course) = &self.editing_lessons_course {
+                    let course_id = course.id;
+                    let conn = Connection::open("db_platform").unwrap();
+                    // Удаляем занятие из БД
+                    match db::delete_lesson(&conn, lesson_id) {
+                        Ok(_) => {
+                            println!("Занятие успешно удалено: {}", lesson_id);
+                            // После успешного удаления, нужно:
+                            // 1. Обновить список занятий в модалке
+                            self.lesson_error_message = None;
+                            match db::get_lessons_for_course(&conn, course_id) {
+                                Ok(lessons) => self.course_lessons = lessons,
+                                Err(e) => println!("Ошибка при обновлении списка занятий после удаления: {:?}", e),
+                            }
+                            // 2. Обновить основной список курсов, чтобы обновился счетчик занятий (см. комментарий в AddLesson)
+                            // Пропускаем для простоты примера.
+                        }
+                        Err(e) => {
+                            println!("Ошибка при удалении занятия {} из БД: {:?}", lesson_id, e);
+                            // Отобразить ошибку в UI
+                        }
+                    }
+                } else {
+                    println!("Ошибка: Не выбран курс для удаления занятия.");
+                }
+            }
             
+            Message::ShowAssignmentsModal(lesson) => {
+                let conn = Connection::open("db_platform").unwrap();
+                self.current_lesson_for_assignments = Some(lesson.clone());
+                match db::get_assignments_for_lesson(&conn, lesson.id) {
+                    Ok(assignments) => {
+                        self.lesson_assignments = assignments;
+                        self.assignment_error_message = None;
+                    }
+                    Err(e) => {
+                        self.lesson_assignments = vec![];
+                        self.assignment_error_message = Some(format!("Не удалось загрузить задания: {}", e));
+                    }
+                }
+                self.show_assignments_modal = true;
+                self.new_assignment_title.clear();
+                self.new_assignment_description.clear();
+                self.new_assignment_type = None;
+            }
+            Message::CloseAssignmentsModal => {
+                self.show_assignments_modal = false;
+                self.current_lesson_for_assignments = None;
+                self.lesson_assignments = vec![];
+                self.assignment_error_message = None;
+                self.new_assignment_title.clear();
+                self.new_assignment_description.clear();
+                self.new_assignment_type = None;
+            }
+            Message::NewAssignmentTitleChanged(title) => {
+                self.new_assignment_title = title;
+            }
+            Message::NewAssignmentDescriptionChanged(description) => {
+                self.new_assignment_description = description;
+            }
+            Message::NewAssignmentTypeSelected(assignment_type) => { 
+                self.new_assignment_type = Some(assignment_type);
+            }
+            Message::AddAssignment => {
+                let conn = Connection::open("db_platform").unwrap();
+                if let Some(current_lesson) = &self.current_lesson_for_assignments {
+                    if self.new_assignment_title.is_empty() || self.new_assignment_description.is_empty() || self.new_assignment_type.is_none() {
+                        self.assignment_error_message = Some("Все поля (название, описание, тип) для нового задания должны быть заполнены.".to_string());
+                    }
+
+                    // Преобразуем выбранный AssignmentType в строку для сохранения в БД
+                    let assignment_type_str = self.new_assignment_type.unwrap().to_string();
+                    match db::add_assignment(&conn, current_lesson.id, &self.new_assignment_title, &self.new_assignment_description, &assignment_type_str) {
+                        Ok(_) => {
+                            match db::get_assignments_for_lesson(&conn, current_lesson.id) {
+                                Ok(assignments) => self.lesson_assignments = assignments,
+                                Err(e) => self.assignment_error_message = Some(format!("Не удалось перезагрузить задания: {}", e)),
+                            }
+                            self.new_assignment_title.clear();
+                            self.new_assignment_description.clear();
+                            self.new_assignment_type = None;
+                            self.assignment_error_message = None;
+                        }
+                        Err(e) => {
+                            self.assignment_error_message = Some(format!("Ошибка добавления задания: {}", e));
+                        }
+                    }
+                } else {
+                    self.assignment_error_message = Some("Нет выбранного занятия для добавления задания.".to_string());
+                }
+            }
+            Message::DeleteAssignment(assignment_id) => {
+                let conn = Connection::open("db_platform").unwrap();
+                match db::delete_assignment(&conn, assignment_id) {
+                    Ok(_) => {
+                        if let Some(current_lesson) = &self.current_lesson_for_assignments {
+                            match db::get_assignments_for_lesson(&conn, current_lesson.id) {
+                                Ok(assignments) => self.lesson_assignments = assignments,
+                                Err(e) => self.assignment_error_message = Some(format!("Не удалось перезагрузить задания: {}", e)),
+                            }
+                        }
+                        self.assignment_error_message = None;
+                    }
+                    Err(e) => {
+                        self.assignment_error_message = Some(format!("Ошибка удаления задания: {}", e));
+                    }
+                }
+            }
+            Message::ShowAssignmentDetailModal(assignment) => {
+                self.selected_assignment_for_detail = Some(assignment);
+                self.show_assignment_detail_modal = true;
+            }
+            Message::CloseAssignmentDetailModal => {
+                self.show_assignment_detail_modal = false;
+                self.selected_assignment_for_detail = None; // Очищаем выбранное задание
+            }
         }
     }
 
@@ -848,7 +1277,7 @@ impl App {
                     Screen::Register => register_screen(self),
                     Screen::Profile => profile_screen(self),
                     Screen::Settings => settings_screen(self),
-                    Screen::Courses => courses_screen(self),
+                    Screen::CoursesList => courses_screen(self),
                     Screen::UserList => user_list_screen(self),
                     Screen::GroupList => groups_screen(self),
                 }
@@ -863,6 +1292,7 @@ impl App {
         self.user_patronymic.clear();
         self.user_email.clear();
         self.user_password.clear();
+        self.user_birthday.clear();
         self.user_password_repeat.clear();
         self.register_error = None;
         self.registration_success = false;
