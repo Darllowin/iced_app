@@ -50,65 +50,72 @@ pub fn classes_screen(app: &App) -> Container<Message> {
             lessons_with_assignments_list_column = lessons_with_assignments_list_column.push(Text::new("В этом курсе пока нет уроков."));
         } else {
             for lesson_with_assignments in &app.selected_group_lessons_with_assignments {
-                let lesson_header = Row::new()
+                // Создаем отдельную колонку для каждого урока
+                let mut lesson_card_content = Column::new()
+                    .spacing(5) // Пространство между элементами внутри карточки урока
+                    .width(Length::Fill);
+
+                // Заголовок урока и кнопка "Провести занятие"
+                let mut lesson_header_row = Row::new()
                     .spacing(10)
                     .align_y(Alignment::Center)
                     .push(Text::new(format!("{}. {}",
-                                            lesson_with_assignments.number.unwrap_or(0),
+                                            lesson_with_assignments.number,
                                             lesson_with_assignments.title))
                         .width(Length::FillPortion(10))
                         .size(20)
                     )
-                    .push(horizontal_space())
-                    .push(
-                        if !lesson_with_assignments.assignments.is_empty() {
-                            Button::new(Text::new("Провести занятие"))
-                                .on_press(Message::ConductLesson(lesson_with_assignments.id, selected_group.id))
-                        } else {
-                            Button::new(Text::new("Провести занятие"))
-                        }
-                    );
+                    .push(horizontal_space());
 
-                let mut lesson_item_content = Column::new()
-                    .spacing(5)
-                    .width(Length::Fill)
-                    .push(lesson_header);
+                // Определяем, какая кнопка или текст будет отображаться
+                let conduct_button_or_text = 
+                    Button::new(Text::new("Провести занятие"))
+                        .on_press(Message::ConductLesson(lesson_with_assignments.id, selected_group.id));
 
-                // Отображение заданий для текущего урока
-                if lesson_with_assignments.assignments.is_empty() {
-                    lesson_item_content = lesson_item_content.push(
-                        Text::new("Заданий для этого урока нет.").size(18).color(Color::from_rgb8(204, 36, 29))
-                    );
-                } else {
-                    lesson_item_content = lesson_item_content.push(
-                        Text::new("Задания:").size(20)
+                lesson_header_row = lesson_header_row.push(conduct_button_or_text);
+
+                // Добавляем заголовок урока в колонку содержимого карточки урока
+                lesson_card_content = lesson_card_content.push(lesson_header_row);
+
+                // Отображение заданий для текущего урока (если они есть)
+                if !lesson_with_assignments.assignments.is_empty() {
+                    lesson_card_content = lesson_card_content.push(
+                        Text::new("Задания:").size(18).color(Color::from_rgb8(142, 192, 124)) // Немного темнее зеленый
                     );
                     for assignment in &lesson_with_assignments.assignments {
                         let assignment_display = Row::new()
-                            .spacing(5)
+                            .spacing(10) // Пространство между элементами задания
+                            .align_y(Alignment::Center)
                             .push(
-                                Container::new(Row::new()
-                                    .push(
-                                        Text::new(format!("  - {} ({})", assignment.title, assignment.assignment_type)).size(14)
-                                    )
-                                    .push(
-                                        Container::new(text(&assignment.description).size(14))
-                                            .width(Length::FillPortion(10))
-                                            .height(Length::Fixed(100.0))
-                                            .align_y(Alignment::Center)
-                                    )
-                                    .spacing(10).align_y(Alignment::Center)
-                                ).style(move |_| bordered_box(&app.theme))
+                                // Можно добавить отступ для вложенности
+                                Text::new(format!("  - {} ({})", assignment.title, assignment.assignment_type)).size(16)
+                                    .width(Length::FillPortion(3))
+                            )
+                            .push(
+                                Container::new(text(&assignment.description).size(14))
+                                    .width(Length::FillPortion(5))
+                                    .height(Length::Shrink) // Высота по содержимому
+                                    .align_y(Alignment::Center)
                             );
-                        lesson_item_content = lesson_item_content.push(assignment_display);
+                        lesson_card_content = lesson_card_content.push(
+                            Container::new(assignment_display)
+                                .padding(5)
+                                .width(Length::Fill)
+                                .style(move |_| bordered_box(&app.theme)) // Отдельная рамка для каждого задания
+                        );
                     }
+                } else {
+                    // Если заданий нет, уже отобразили текст "Нет заданий..." в conduct_button_or_text
+                    // Можно добавить пустой спейсер, если нужен отступ
+                    lesson_card_content = lesson_card_content.push(horizontal_space().height(Length::Fixed(5.0)));
                 }
 
+                // Добавляем готовую карточку урока (заголовок + задания) в основной список уроков
                 lessons_with_assignments_list_column = lessons_with_assignments_list_column.push(
-                    Container::new(lesson_item_content)
+                    Container::new(lesson_card_content)
                         .padding(10)
                         .width(Length::Fill)
-                        .style(move |_| bordered_box(&app.theme))
+                        .style(move |_| bordered_box(&app.theme)) // Рамка для всей карточки урока
                 );
             }
         }
@@ -116,7 +123,7 @@ pub fn classes_screen(app: &App) -> Container<Message> {
             Scrollable::new(
                 Container::new(lessons_with_assignments_list_column)
                     .padding(10)
-                    .style(move |_| bordered_box(&app.theme))
+                    //.style(move |_| bordered_box(&app.theme)) // Общая рамка для всего прокручиваемого списка
             )
                 .height(Length::FillPortion(1))
         );
@@ -127,15 +134,14 @@ pub fn classes_screen(app: &App) -> Container<Message> {
         );
     }
 
-
     let base_ui = Container::new(main_column)
         .width(Length::Fill)
         .height(Length::Fill);
-        //.style(move |_| bordered_box(&app.theme));
 
     let mut ui_stack = Stack::new().push(base_ui);
 
     // --- Модальное окно заданий преподавателя ---
+    // ... (Этот блок остается без изменений, так как он относится к модальному окну, а не к основному списку)
     if app.show_teacher_assignment_modal {
         if let Some(proven_lesson) = &app.selected_proven_lesson_for_assignments {
             let modal_title_text = format!("Задания для: {} ({}) - {}",

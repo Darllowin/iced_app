@@ -1,17 +1,17 @@
-use iced::{Length, Task, Theme};
-use iced::widget::{text_editor, Column, Container, Row};
-use crate::screens::{login_screen, register_screen, profile_screen, settings_screen, nav_menu, courses_screen, user_list_screen, groups_screen, classes_screen};
-use std::{fmt, fs};
-use std::str::FromStr;
-use chrono::Local;
-use iced_aw::date_picker::Date;
-use regex::Regex;
-use serde::{Deserialize, Serialize};
-use rusqlite::{Connection};
-use sha2::{Sha256, Digest};
-use tokio::task;
 use crate::db;
 use crate::screens::settings::theme_to_str;
+use crate::screens::{classes_screen, courses_screen, groups_screen, login_screen, nav_menu, profile_screen, register_screen, settings_screen, user_list_screen};
+use iced::widget::{text_editor, Column, Container, Row};
+use iced::{Length, Task, Theme};
+use iced_aw::date_picker::Date;
+use regex::Regex;
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::str::FromStr;
+use std::{fmt, fs};
+use tokio::task;
+use tokio::task::spawn_blocking;
 
 const CONFIG_FILE: &str = "config.json";
 pub const DEFAULT_AVATAR: &str = "default_avatar.jpg";
@@ -44,7 +44,7 @@ pub struct App {
     pub show_add_course_modal: bool,
     pub new_course_title: String,
     pub new_course_description: String,
-    pub new_course_instructor: Option<String>,
+    //pub new_course_instructor: Option<String>,
     pub new_course_level: Level,
     // Добавлены поля для редактирования курса
     pub editing_course: Option<Course>,
@@ -83,11 +83,11 @@ pub struct App {
 
     pub group_filter_text: String,
 
-    pub selected_group_id: Option<i32>,
+    //pub selected_group_id: Option<i32>,
     pub is_manage_students_modal_open: bool,
-    pub group_students: Vec<UserInfo>,
-    pub all_students: Vec<String>,
-    pub selected_student_to_add: Option<String>,
+    //pub group_students: Vec<UserInfo>,
+    //pub all_students: Vec<String>,
+    pub selected_student_to_add: Option<UserInfo>,
     //pub user_group_name: Option<String>,
     //pub logged_in_user_id: Option<i32>,
 
@@ -151,9 +151,26 @@ pub struct App {
     pub all_groups: Vec<Group>,
     pub all_courses: Vec<Course>,
     pub past_sessions_for_group: Vec<PastSession>, // Для отображения списка прошедших занятий
+
+    pub show_group_lessons_modal: bool,
+    pub group_lessons_modal_lessons: Vec<LessonWithAssignments>, // Список уроков для отображения в модальном окне
+    pub group_lessons_modal_past_sessions: Vec<PastSession>, // Список пройденных занятий для отображения
+    pub group_lessons_modal_group_name: String,
+    pub current_manage_students_group_id: Option<i32>,
+    pub students_in_current_group_modal: Vec<UserInfo>,
+    pub students_without_group: Vec<UserInfo>,
+
+    pub courses_for_picklist: Vec<Course>, // Для PickList курсов в модалке групп
+    pub users_for_picklist: Vec<UserInfo>,
+    pub group_error_message: Option<String>,
+
+    pub student_group_info: Option<Group>,
+    pub show_group_students_modal: bool,
+    pub selected_group_for_students_name: Option<String>, // Для отображения названия группы в модалке
+    pub selected_group_students: Vec<UserInfo>,
 }
 
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone, Eq, Hash, PartialOrd, Ord)]
 pub struct UserInfo {
     pub id: i32,
     pub name: String,
@@ -161,9 +178,10 @@ pub struct UserInfo {
     pub birthday: String,
     pub user_type: String, // Теперь соответствует полю "Type" в БД
     pub avatar_data: Option<Vec<u8>>,
-    pub group: Option<String>,      // Это поле может быть, но оно всегда будет None из Users
+    pub group_id: Option<String>,      // Это поле может быть, но оно всегда будет None из Users
     pub child_count: Option<i32>,   // Это поле может быть, но оно всегда будет None из Users
 }
+
 
 // Для PickList:
 // Чтобы PickList мог отобразить пользователя
@@ -195,16 +213,27 @@ pub struct Group {
 
 impl fmt::Display for Group {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Отображаем имя группы, опционально с курсом и преподавателем
-        write!(f, "{} (", self.name)?;
+        // Начинаем с имени группы
+        write!(f, "{}", self.name)?;
+
         let mut parts = Vec::new();
-        if let Some(course) = &self.course_id {
-            parts.push(format!("Курс: {}", course));
+
+        // Добавляем название курса, если оно есть
+        if let Some(course_name) = &self.course_name {
+            parts.push(format!("Курс: {}", course_name));
         }
-        if let Some(teacher) = &self.teacher_id {
-            parts.push(format!("Преподаватель: {}", teacher));
+
+        // Добавляем название преподавателя, если оно есть
+        if let Some(teacher_name) = &self.teacher_name {
+            parts.push(format!("Преподаватель: {}", teacher_name));
         }
-        write!(f, "{})", parts.join(", "))
+
+        // Если есть дополнительные части (курс или преподаватель), добавляем их в скобках
+        if !parts.is_empty() {
+            write!(f, " ({})", parts.join(", "))?;
+        }
+
+        Ok(())
     }
 }
 
@@ -212,7 +241,7 @@ impl fmt::Display for Group {
 pub struct Lesson {
     pub id: i32,
     pub course_id: i32,
-    pub number: Option<i32>, // Номер может быть опциональным
+    pub number: i32, // Номер может быть опциональным
     pub title: String,
 }
 
@@ -279,7 +308,7 @@ impl PartialEq for Lesson {
 pub struct LessonWithAssignments {
     pub id: i32,          // ID урока из таблицы Lessons
     pub course_id: i32,
-    pub number: Option<i32>,
+    pub number: i32,
     pub title: String,
     pub assignments: Vec<Assignment>, // Список заданий для этого урока
 }
@@ -332,7 +361,11 @@ pub enum Level {
     Intermediate,
     Advanced,
 }
-
+impl Default for Level {
+    fn default() -> Self {
+        Level::Beginner
+    }
+}
 impl Level {
     pub const ALL: &'static [Level] = &[
         Level::Beginner,
@@ -442,12 +475,12 @@ pub enum Message {
     // Для групп
     ToggleAddGroupModal(bool),
     NewGroupNameChanged(String),
-    NewGroupCourseChanged(Option<i32>),
-    NewGroupTeacherChanged(Option<i32>),
+    NewGroupCourseChanged(Option<Course>),
+    NewGroupTeacherChanged(Option<UserInfo>),
 
     EditGroupNameChanged(String),
-    EditGroupCourseChanged(Option<i32>),
-    EditGroupTeacherChanged(Option<i32>),
+    EditGroupCourseChanged(Option<Course>),
+    EditGroupTeacherChanged(Option<UserInfo>),
 
     SubmitNewGroup,
     SubmitEditedGroup,
@@ -458,9 +491,9 @@ pub enum Message {
 
     OpenManageStudentsModal(i32),
     CloseManageStudentsModal,
-    StudentToAddSelected(Option<String>),
+    StudentToAddSelected(Option<UserInfo>),
     AddStudent,
-    RemoveStudent(String),
+    //RemoveStudent(String),
 
     ShowParentChildren(String), // email родителя
     CloseParentChildrenModal,
@@ -490,7 +523,7 @@ pub enum Message {
     EditingAssignmentDescriptionChanged(TextInputOrEditorInput),
     SaveEditedAssignment, // Для сохранения изменений
     // --- Сообщения, связанные с экраном занятий ---
-    LoadTeacherGroups,
+    LoadTeacherGroups(i32),
     TeacherGroupsLoaded(Result<Vec<Group>, String>), // Result для обработки ошибок
     SelectGroupForClasses(Group),
     LoadGroupProvenLessons,
@@ -545,6 +578,26 @@ pub enum Message {
 
     ConductLessonResult(Result<Vec<PastSession>, String>), // Результат добавления и загрузки PastSessions
     ShowError(String), // Более общее сообщение для отображения ошибок
+
+    OpenGroupLessonsModal(i32, i32), // group_id, course_id
+    GroupLessonsModalLoaded(Result<(Vec<LessonWithAssignments>, Vec<PastSession>), String>), // (доступные уроки, пройденные уроки)
+    CloseGroupLessonsModal,
+
+    LoadAllGroups, // <-- НОВОЕ СООБЩЕНИЕ: Загрузить все группы
+    StudentsInGroupLoaded(Result<Vec<UserInfo>, String>),
+    StudentsWithoutGroupLoaded(Result<Vec<UserInfo>, String>),
+
+    CoursesForPicklistLoaded(Result<Vec<Course>, String>),
+    UsersForPicklistLoaded(Result<Vec<UserInfo>, String>),
+    RemoveStudentFromGroup(i32, i32),
+    ErrorOccurred(String),
+    LoadStudentGroupInfo, // Для загрузки группы студента
+    StudentGroupInfoLoaded(Result<Option<Group>, String>),
+    ShowGroupStudents(i32), // Показать модальное окно с студентами группы (передаем group_id)
+    //LoadGroupStudents(i32), // Сообщение для асинхронной загрузки студентов
+    GroupStudentsLoaded(Result<(i32, Vec<UserInfo>), String>), // i32 - group_id, Vec<StudentInfo> - студенты
+    CloseGroupStudentsModal, // Закрыть модальное окно
+
 }
 impl Default for App {
     fn default() -> Self {
@@ -570,7 +623,7 @@ impl Default for App {
             user_birthday: "".to_string(),
             type_user: "".to_string(),
             new_course_description: "".to_string(),
-            new_course_instructor: None,
+            //new_course_instructor: None,
             new_course_level: Level::Beginner,
             editing_course: None,
             edit_course_title: "".to_string(),
@@ -602,10 +655,10 @@ impl Default for App {
             edit_group_course: None,
             edit_group_teacher: None,
             group_filter_text: "".to_string(),
-            selected_group_id: None,
+            //selected_group_id: None,
             is_manage_students_modal_open: false,
-            group_students: vec![],
-            all_students: vec![],
+            //group_students: vec![],
+            //all_students: vec![],
             selected_student_to_add: None,
             //user_group_name: None,
             //logged_in_user_id: None,
@@ -657,11 +710,26 @@ impl Default for App {
             all_groups: vec![],
             all_courses: vec![],
             past_sessions_for_group: vec![],
+            show_group_lessons_modal: false,
+            group_lessons_modal_lessons: vec![],
+            group_lessons_modal_past_sessions: vec![],
+            group_lessons_modal_group_name: "".to_string(),
+            current_manage_students_group_id: None,
+            students_in_current_group_modal: vec![],
+            students_without_group: vec![],
+            courses_for_picklist: vec![],
+            users_for_picklist: vec![],
+            group_error_message: None,
+            student_group_info: None,
+            show_group_students_modal: false,
+            selected_group_for_students_name: None,
+            selected_group_students: vec![],
         }
     }
 }
 impl App {
     pub fn update(&mut self, message: Message) -> Task<Message>{
+        let current_user_for_task_clone = self.current_user.clone();
         match message {
             Message::LoginPressed => {
                 if self.user_email.trim().is_empty() || self.user_password.trim().is_empty() {
@@ -679,29 +747,43 @@ impl App {
             }
             Message::UserLoggedIn(result) => {
                 match result {
-                    Ok(user_info_data) => { // <-- ИЗМЕНИТЕ ЭТО ЗДЕСЬ! Назовите переменную, например, user_info_data
+                    Ok(user_info_data) => {
                         self.current_user = Some(UserInfo {
                             id: user_info_data.id,
-                            name: user_info_data.name, // <-- Теперь это будет работать!
+                            name: user_info_data.name,
                             email: user_info_data.email,
                             birthday: user_info_data.birthday,
                             user_type: user_info_data.user_type.clone(),
-                            group: user_info_data.group, // <-- И здесь UserInfo.group (поле структуры)
+                            group_id: user_info_data.group_id,
                             avatar_data: user_info_data.avatar_data,
                             child_count: user_info_data.child_count,
                         });
 
                         self.current_screen = Screen::Profile;
-                        self.error_message.clear();
 
                         if let Some(user) = &self.current_user {
-                            if user.user_type == "teacher" {
-                                return self.update(Message::LoadTeacherGroups);
+                            if user.user_type == "admin" {
+                                println!("DEBUG: Пользователь является АДМИНИСТРАТОРОМ. Запускаем загрузку ВСЕХ групп.");
+                                // !!! АДМИНИСТРАТОР: отправляем LoadAllGroups
+                                return self.update(Message::LoadAllGroups);
+                            } else if user.user_type == "teacher" {
+                                println!("DEBUG: Пользователь является ПРЕПОДАВАТЕЛЕМ. Запускаем загрузку его групп.");
+                                let teacher_id_for_task = user.id;
+                                // !!! ПРЕПОДАВАТЕЛЬ: отправляем LoadTeacherGroups с ID
+                                return self.update(Message::LoadTeacherGroups(teacher_id_for_task));
+                            } else if user.user_type == "student" { // <-- ДОБАВЛЕН ВАРИАНТ ДЛЯ СТУДЕНТА
+                                println!("DEBUG: Пользователь является СТУДЕНТОМ. Запускаем загрузку его группы.");
+                                // !!! СТУДЕНТ: отправляем LoadStudentGroupInfo
+                                return self.update(Message::LoadStudentGroupInfo);
+                            }
+                            else {
+                                // Если это родитель или другой тип пользователя, для которого нет специфичной загрузки
+                                println!("DEBUG: Пользователь {} (ID: {}) не преподаватель, не администратор и не студент. Группы не загружаются автоматически.", user.user_type, user.id);
                             }
                         }
                     }
                     Err(e) => {
-                        self.error_message = e.clone();
+                        self.error_message = e.to_string();
                         eprintln!("Ошибка входа: {}", e);
                     }
                 }
@@ -943,6 +1025,84 @@ impl App {
                 self.new_course_description = desc;
                 Task::none()
             }
+            Message::LoadStudentGroupInfo => Task::perform(
+                async move { // 'move' здесь захватывает `current_user_for_task_clone`
+                    let conn = rusqlite::Connection::open("db_platform").map_err(|e| e.to_string())?;
+                    // Теперь `current_user_for_task_clone` доступен, так как он был захвачен `move` замыканием
+                    if let Some(user_id) = current_user_for_task_clone.as_ref().map(|u| u.id) { // <-- Используем правильную клонированную переменную
+                        crate::db::get_student_group_by_user_id(&conn, user_id)
+                            .map_err(|e| e.to_string())
+                    } else {
+                        Ok(None)
+                    }
+                },
+                Message::StudentGroupInfoLoaded,
+            ),
+            Message::StudentGroupInfoLoaded(result) => {
+                match result {
+                    Ok(group_opt) => {
+                        self.student_group_info = group_opt;
+                        // Отладочный вывод
+                        if self.student_group_info.is_some() {
+                            println!("DEBUG: Student group loaded: {:?}", self.student_group_info);
+                        } else {
+                            println!("DEBUG: Student has no group or failed to load.");
+                        }
+                    },
+                    Err(e) => {
+                        self.error_message = e;
+                        println!("ERROR: Failed to load student group: {}", self.error_message);
+                    }
+                }
+                Task::none()
+            },
+
+            Message::ShowGroupStudents(group_id) => {
+                self.show_group_students_modal = true;
+                // Находим название группы, чтобы отобразить его в модальном окне
+                if let Some(group) = self.teacher_groups.iter().find(|g| g.id == group_id) {
+                    self.selected_group_for_students_name = Some(group.name.clone());
+                } else {
+                    self.selected_group_for_students_name = None;
+                }
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            // 1. Открываем соединение, обрабатывая Result и преобразуя ошибку в String
+                            let conn = rusqlite::Connection::open("db_platform")
+                                .map_err(|e| e.to_string())?; // <-- ИСПРАВЛЕНО
+
+                            // 2. Вызываем функцию БД, обрабатывая Result и преобразуя ошибку в String
+                            let students = db::get_students_in_group(&conn, group_id)
+                                .map_err(|e| e.to_string())?; // <-- ИСПРАВЛЕНО
+
+                            Ok((group_id, students))
+                        }).await // Ждем завершения блокирующей задачи
+                            .map_err(|e| format!("Failed to run blocking task: {:?}", e))? // Обработка ошибки от tokio::task::JoinError
+                    },
+                    Message::GroupStudentsLoaded,
+                )
+            },
+            Message::GroupStudentsLoaded(result) => {
+                match result {
+                    Ok((_group_id, students)) => {
+                        self.selected_group_students = students; // Теперь 'students' будет Vec<UserInfo>
+                        println!("DEBUG: Students for group loaded: {} students", self.selected_group_students.len());
+                    },
+                    Err(e) => {
+                        self.error_message = e;
+                        println!("ERROR: Failed to load students for group: {}", self.error_message);
+                        self.show_group_students_modal = false;
+                    }
+                }
+                Task::none()
+            },
+            Message::CloseGroupStudentsModal => {
+                self.show_group_students_modal = false;
+                self.selected_group_for_students_name = None;
+                self.selected_group_students.clear();
+                Task::none()
+            },
             Message::LoadAllCourses => {
                 Task::perform(
                     async move {
@@ -971,20 +1131,42 @@ impl App {
                     Message::AllUsersLoaded // <-- Когда задача завершится, отправь это сообщение
                 )
             }
-            Message::LoadGroups => { // Если вы еще не загружаете группы асинхронно
+            Message::LoadGroups => {
+                let user_type_clone = self.current_user.as_ref().map(|u| u.user_type.clone());
+                let current_user_id = self.current_user.as_ref().map(|u| u.id).unwrap_or(0);
+
                 Task::perform(
                     async move {
-                        task::spawn_blocking(move || {
-                            let conn = Connection::open("db_platform")
-                                .map_err(|e| format!("Не удалось открыть БД для групп: {}", e))?;
-                            db::get_groups(&conn) // Убедитесь, что db::get_groups существует
-                                .map_err(|e| format!("Ошибка загрузки групп: {}", e))
-                        }).await
-                            .map_err(|join_err| format!("Ошибка выполнения задачи загрузки групп: {}", join_err))?
+                        tokio::task::spawn_blocking(move || {
+                            let conn = rusqlite::Connection::open("db_platform")
+                                .map_err(|e| format!("Не удалось открыть БД для загрузки групп: {}", e))?;
+
+                            let groups_result = if let Some(user_type) = user_type_clone {
+                                if user_type == "admin" {
+                                    db::get_all_groups(&conn)
+                                } else if user_type == "teacher" {
+                                    db::get_teacher_groups_with_details(&conn, current_user_id)
+                                } else {
+                                    Ok(Vec::new())
+                                }
+                            } else {
+                                Ok(Vec::new())
+                            };
+
+                            groups_result.map_err(|e| format!("Ошибка загрузки групп: {}", e))
+                        })
+                            .await
+                            .map_err(|join_err| {
+                                eprintln!("Блокирующая задача для загрузки групп завершилась ошибкой: {:?}", join_err);
+                                format!("Ошибка выполнения операции: {}", join_err)
+                            })?
                     },
-                    Message::GroupsLoaded
+                    |result: Result<Vec<Group>, String>| {
+                        // Теперь мы просто передаем весь 'result' в GroupsLoaded
+                        Message::GroupsLoaded(result) // <--- ИСПРАВЛЕНИЕ ЗДЕСЬ
+                    }
                 )
-            }
+            },
 
 
             // --- Обработка результатов загрузки данных ---
@@ -1018,41 +1200,71 @@ impl App {
                 }
                 Task::none()
             }
-            Message::GroupsLoaded(result) => {
+            Message::GroupsLoaded(result) => { // <--- ИСПРАВЛЕНИЕ ЗДЕСЬ: 'result' теперь сам является Result
                 match result {
                     Ok(groups) => {
-                        self.all_groups = groups; // Предполагаем, что у вас есть `pub all_groups: Vec<Group>` в App
-                        println!("DEBUG: all_groups заполнена: {:?}", self.all_groups);
-                        self.error_message = "".to_string();
-                    }
+                        self.teacher_groups = groups;
+                    },
                     Err(e) => {
-                        eprintln!("Ошибка при загрузке групп: {}", e);
-                        self.error_message = e.to_string();
+                        eprintln!("ERROR: Ошибка загрузки групп: {}", e);
+                        // self.error_message = Some(e); // Опционально: отобразить ошибку пользователю
                     }
                 }
                 Task::none()
             }
             Message::SubmitNewCourse => {
-                // Эта операция должна быть асинхронной
-                let conn = Connection::open("db_platform").unwrap();
-
-                let level_str = self.new_course_level.to_string(); // Level::to_string() возвращает String
-                // instructor_str здесь больше не нужен, мы используем ID
-
-                if db::add_course(
-                    &conn,
-                    &self.new_course_title,
-                    &self.new_course_description,
-                    self.new_course_teacher_id, // <--- ПЕРЕДАЁМ Option<i32> ID ПРЕПОДАВАТЕЛЯ
-                    Some(&level_str),           // <--- Теперь передаём ссылку на String
-                ).is_ok() {
-                    self.show_add_course_modal = false;
-                    self.new_course_title.clear();
-                    self.new_course_description.clear();
-                    self.new_course_teacher_id = None; // Очищаем ID преподавателя
-                    self.new_course_level = Level::Beginner;
+                // Проверка на пустые поля
+                if self.new_course_title.is_empty() {
+                    self.course_error_message = Some("Название курса не может быть пустым.".to_string());
+                    return Task::none();
                 }
-                Task::none() // Возвращаем Task::none()
+                if self.new_course_description.is_empty() {
+                    self.course_error_message = Some("Описание курса не может быть пустым.".to_string());
+                    return Task::none();
+                }
+                if self.new_course_teacher_id.is_none() {
+                    self.course_error_message = Some("Необходимо выбрать преподавателя.".to_string());
+                    return Task::none();
+                }
+                // self.new_course_level всегда будет Some(Level) из-за PickList и инициализации в `new`
+                // но для безопасности и единообразия с другими Optional полями используем unwrap_or_default()
+
+                // Очищаем предыдущие ошибки, если они были
+                self.course_error_message = None;
+
+                let new_course_title_clone = self.new_course_title.clone();
+                let new_course_description_clone = self.new_course_description.clone();
+                let new_course_teacher_id = self.new_course_teacher_id.unwrap_or(0); // Безопасно, т.к. проверили is_none()
+
+                let new_course_level_string = self.new_course_level.to_string(); // Преобразуем Level в String для БД
+
+                // Очищаем поля формы после успешной проверки, но до выполнения Task
+                self.new_course_title.clear();
+                self.new_course_description.clear();
+                self.new_course_teacher_id = None;
+                self.new_course_level = Level::default(); // Сброс к дефолту. Используем Level::default()
+                // или Some(Level::Beginner)
+
+                self.show_add_course_modal = false; // Закрываем модалку
+
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            let conn = Connection::open("db_platform")
+                                .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
+                            // Вызов db::add_course скорректирован согласно его сигнатуре (Option<i32>, Option<&str>)
+                            db::add_course(&conn, &new_course_title_clone, &new_course_description_clone, Some(new_course_teacher_id), Some(&new_course_level_string))
+                                .map_err(|e| format!("Ошибка добавления курса: {}", e))
+                        }).await
+                            .map_err(|join_err| format!("Ошибка выполнения задачи: {:?}", join_err))?
+                    },
+                    |result: Result<(), String>| {
+                        match result {
+                            Ok(_) => Message::LoadAllCourses, // <--- ИСПРАВЛЕНО СООБЩЕНИЕ!
+                            Err(e) => Message::ErrorOccurred(e),
+                        }
+                    }
+                )
             }
 
             Message::DeleteCourse(course_id) => {
@@ -1074,11 +1286,7 @@ impl App {
             Message::StartEditingCourse(course) => {
                 self.edit_course_title = course.title.clone();
                 self.edit_course_description = course.description.clone();
-
-                // <--- ИЗМЕНЕНИЯ ЗДЕСЬ
-                // Теперь App должен хранить ID преподавателя, а не UserInfo или String имени
-                self.edit_course_teacher_id = course.instructor_id; // Используем instructor_id из Course
-                // self.edit_course_instructor_name = course.instructor_name.clone(); // Если нужно хранить имя тоже, но для PickList нужен только ID UserInfo, а PickList выведет имя сам
+                self.edit_course_teacher_id = course.instructor_id;
 
                 self.edit_course_level = course.level.clone()
                     .and_then(|level_str| Level::from_str(&level_str).ok())
@@ -1275,25 +1483,91 @@ impl App {
                 self.course_filter_text = text;
                 Task::none()
             }
-            Message::ToggleAddGroupModal(show) => {
-                if !show {
+            Message::CoursesForPicklistLoaded(result) => {
+                match result {
+                    Ok(courses) => {
+                        self.courses_for_picklist = courses;
+                        println!("DEBUG: Курсы для PickList загружены: {} шт.", self.courses_for_picklist.len());
+                    },
+                    Err(e) => {
+                        eprintln!("ERROR: Не удалось загрузить курсы для PickList: {}", e);
+                        self.error_message = e.to_string();
+                    }
+                }
+                Task::none()
+            }
+            Message::UsersForPicklistLoaded(result) => {
+                match result {
+                    Ok(users) => {
+                        // Для PickList преподавателей можно отфильтровать только учителей
+                        self.users_for_picklist = users.clone().into_iter().filter(|u| u.user_type == "teacher").collect();
+                        println!("DEBUG: Пользователи для PickList загружены: {} шт. (из них преподавателей: {})", users.len(), self.users_for_picklist.len());
+                    },
+                    Err(e) => {
+                        eprintln!("ERROR: Не удалось загрузить пользователей для PickList: {}", e);
+                        self.error_message = e.to_string();
+                    }
+                }
+                Task::none()
+            }
+            Message::ToggleAddGroupModal(open) => {
+                self.show_add_group_modal = open;
+                if open {
+                    println!("DEBUG: Открываем модальное окно добавления/редактирования группы.");
+                    // Загружаем данные для PickList'ов при открытии модалки
+                    let task_courses = Task::perform(
+                        async {
+                            task::spawn_blocking(move || {
+                                let conn = Connection::open("db_platform")
+                                    .map_err(|e| format!("Не удалось открыть БД для курсов: {}", e))?;
+                                db::get_courses(&conn) // У вас должна быть db::get_courses
+                                    .map_err(|e| format!("Ошибка загрузки курсов: {}", e))
+                            })
+                                .await
+                                .unwrap_or_else(|join_err| Err(format!("Ошибка выполнения задачи загрузки курсов: {:?}", join_err)))
+                        },
+                        |result| Message::CoursesForPicklistLoaded(result)
+                    );
+
+                    let task_users = Task::perform(
+                        async {
+                            task::spawn_blocking(move || {
+                                let conn = Connection::open("db_platform")
+                                    .map_err(|e| format!("Не удалось открыть БД для пользователей: {}", e))?;
+                                db::get_all_users(&conn) // У вас должна быть db::get_all_users
+                                    .map_err(|e| format!("Ошибка загрузки пользователей: {}", e))
+                            })
+                                .await
+                                .unwrap_or_else(|join_err| Err(format!("Ошибка выполнения задачи загрузки пользователей: {:?}", join_err)))
+                        },
+                        |result| Message::UsersForPicklistLoaded(result)
+                    );
+                    Task::batch(vec![task_courses, task_users])
+                } else {
+                    // Очистка состояния модалки при закрытии
+                    self.editing_group = None;
                     self.new_group_name.clear();
                     self.new_group_course = None;
                     self.new_group_teacher = None;
+                    self.edit_group_name.clear();
+                    self.edit_group_course = None;
+                    self.edit_group_teacher = None;
+                    self.group_error_message = None;
+                    self.courses_for_picklist.clear(); // Очищаем данные PickList'ов
+                    self.users_for_picklist.clear();
+                    Task::none()
                 }
-                self.show_add_group_modal = show;
-                Task::none()
             }
             Message::NewGroupNameChanged(name) => {
                 self.new_group_name = name;
                 Task::none()
             }
-            Message::NewGroupCourseChanged(course) => {
-                self.new_group_course = course;
+            Message::NewGroupCourseChanged(selected_course) => {
+                self.new_group_course = selected_course.map(|c| c.id); // Сохраняем только ID
                 Task::none()
             }
-            Message::NewGroupTeacherChanged(teacher) => {
-                self.new_group_teacher = teacher;
+            Message::NewGroupTeacherChanged(selected_teacher) => {
+                self.new_group_teacher = selected_teacher.map(|u| u.id); // Сохраняем только ID
                 Task::none()
             }
 
@@ -1301,22 +1575,32 @@ impl App {
                 self.edit_group_name = name;
                 Task::none()
             }
-            Message::EditGroupCourseChanged(course) => {
-                self.edit_group_course = course;
+            Message::EditGroupCourseChanged(selected_course) => {
+                self.edit_group_course = selected_course.map(|c| c.id); // Сохраняем только ID
                 Task::none()
             }
-            Message::EditGroupTeacherChanged(teacher) => {
-                self.edit_group_teacher = teacher;
+            Message::EditGroupTeacherChanged(selected_teacher) => {
+                self.edit_group_teacher = selected_teacher.map(|u| u.id); // Сохраняем только ID
                 Task::none()
             }
 
             Message::StartEditingGroup(group) => {
                 self.editing_group = Some(group.clone());
-                self.edit_group_name = group.name.clone();
-                self.edit_group_course = group.course_id;
-                self.edit_group_teacher = group.teacher_id.clone();
-                self.show_add_group_modal = true;
-                Task::none()
+                self.edit_group_name = group.name;
+                self.edit_group_course = group.course_id; // Убедитесь, что group.course_id это Option<i32>
+                self.edit_group_teacher = group.teacher_id; // Убедитесь, что group.teacher_id это Option<i32>
+                self.show_add_group_modal = true; // Открываем модалку
+                // Вызываем загрузку списков для PickList
+                Task::batch(vec![
+                    Task::perform(
+                        async { db::get_courses(&Connection::open("db_platform").unwrap()).map_err(|e| e.to_string()) },
+                        |r| Message::CoursesForPicklistLoaded(r)
+                    ),
+                    Task::perform(
+                        async { db::get_all_users(&Connection::open("db_platform").unwrap()).map_err(|e| e.to_string()) },
+                        |r| Message::UsersForPicklistLoaded(r)
+                    )
+                ])
             }
             Message::CancelEditingGroup => {
                 self.editing_group = None;
@@ -1324,95 +1608,114 @@ impl App {
                 self.edit_group_course = None;
                 self.edit_group_teacher = None;
                 self.show_add_group_modal = false;
+                self.group_error_message = None;
                 Task::none()
             }
             Message::SubmitEditedGroup => {
-                let edited_group_id = self.editing_group.as_ref().map(|g| g.id);
-                let edited_group_name_clone = self.edit_group_name.clone();
-                let edited_group_course_id = self.edit_group_course;
-                let edited_group_teacher_id = self.edit_group_teacher;
+                // Проверки на пустые поля
+                if self.edit_group_name.is_empty() {
+                    self.group_error_message = Some("Название группы не может быть пустым.".to_string());
+                    return Task::none();
+                }
+                if self.edit_group_course.is_none() {
+                    self.group_error_message = Some("Необходимо выбрать курс для группы.".to_string());
+                    return Task::none();
+                }
+                if self.edit_group_teacher.is_none() {
+                    self.group_error_message = Some("Необходимо выбрать преподавателя для группы.".to_string());
+                    return Task::none();
+                }
+                if self.editing_group.is_none() {
+                    self.group_error_message = Some("Ошибка: группа для редактирования не выбрана.".to_string());
+                    return Task::none();
+                }
 
-                self.editing_group = None;
+                // Если все поля заполнены, очищаем сообщение об ошибке
+                self.group_error_message = None;
+
+                let group_id = self.editing_group.as_ref().unwrap().id; // ID редактируемой группы
+                let group_name_clone = self.edit_group_name.clone();
+                let group_course_id = self.edit_group_course.unwrap_or_default(); // ID курса (уже i32)
+                let group_teacher_id = self.edit_group_teacher.unwrap_or_default(); // ID преподавателя (уже i32)
+
+                // Очищаем поля ввода и сбрасываем состояние редактирования до выполнения Task
                 self.edit_group_name.clear();
                 self.edit_group_course = None;
                 self.edit_group_teacher = None;
-                self.show_add_group_modal = false;
+                self.group_error_message = None;
+                self.editing_group = None; // Сброс редактируемой группы
+                self.show_add_group_modal = false; // Закрываем модалку
 
                 Task::perform(
                     async move {
-                        task::spawn_blocking(move || {
-                            let conn = Connection::open("db_platform")
-                                .map_err(|e| format!("Не удалось открыть БД: {}", e))?; // <-- map_err
-
-                            let group_id = edited_group_id
-                                .ok_or_else(|| "Не удалось получить ID редактируемой группы".to_string())?;
-                            let course_id = edited_group_course_id
-                                .ok_or_else(|| "Не выбран курс".to_string())?;
-                            let teacher_id = edited_group_teacher_id
-                                .ok_or_else(|| "Не выбран преподаватель".to_string())?;
-
-                            // Теперь вызываем db::update_group с ID напрямую
-                            db::update_group(&conn, group_id, &edited_group_name_clone, course_id, teacher_id) // <--- ПЕРЕДАЕМ ID
-                                .map_err(|e| format!("Ошибка обновления группы: {}", e)) // <-- map_err
-                        }).await // .await для tokio::task::spawn_blocking
-                            .map_err(|join_err| { // <-- map_err для JoinHandle
-                                eprintln!("Блокирующая задача для обновления группы завершилась ошибкой: {:?}", join_err);
-                                format!("Ошибка выполнения операции: {}", join_err)
-                            })? // <-- ? в конце
+                        tokio::task::spawn_blocking(move || {
+                            let conn = rusqlite::Connection::open("db_platform")
+                                .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
+                            db::update_group(&conn, group_id, &group_name_clone, group_course_id, group_teacher_id)
+                                .map_err(|e| format!("Ошибка обновления группы: {}", e))?;
+                            Ok(()) // Возвращаем Ok(()) если все успешно
+                        }).await
+                            .map_err(|join_err| format!("Ошибка выполнения задачи: {:?}", join_err))?
                     },
-                    |result: Result<(), String>| { // Явно укажите тип результата
+                    |result: Result<(), String>| {
                         match result {
-                            Ok(_) => Message::LoadGroups,
-                            Err(e) => {
-                                eprintln!("Ошибка при обновлении группы: {}", e);
-                                Message::Er(e)
-                            }
+                            Ok(_) => Message::LoadAllGroups, // Обновить список групп
+                            Err(e) => Message::ErrorOccurred(e),
                         }
                     }
                 )
             }
             Message::SubmitNewGroup => {
-                let new_group_name_clone = self.new_group_name.clone();
-                let new_group_course_id = self.new_group_course; // Это Option<i32>
-                let new_group_teacher_id = self.new_group_teacher; // Это Option<i32>
+                // Проверки на пустые поля
+                if self.new_group_name.is_empty() {
+                    self.group_error_message = Some("Название группы не может быть пустым.".to_string());
+                    return Task::none();
+                }
+                if self.new_group_course.is_none() {
+                    self.group_error_message = Some("Необходимо выбрать курс для группы.".to_string());
+                    return Task::none();
+                }
+                if self.new_group_teacher.is_none() {
+                    self.group_error_message = Some("Необходимо выбрать преподавателя для группы.".to_string());
+                    return Task::none();
+                }
 
-                // Очищаем поля UI до выполнения асинхронной операции
+                // Если все поля заполнены, очищаем сообщение об ошибке
+                self.group_error_message = None;
+
+                let group_name_clone = self.new_group_name.clone();
+                // ИСПРАВЛЕНО: Просто unwrap() для Option<i32>
+                let group_course_id = self.new_group_course.unwrap(); // new_group_course имеет тип Option<i32>
+                let group_teacher_id = self.new_group_teacher.unwrap(); // new_group_teacher имеет тип Option<i32>
+
+                // Очищаем поля ввода до выполнения Task
                 self.new_group_name.clear();
                 self.new_group_course = None;
                 self.new_group_teacher = None;
-                self.show_add_group_modal = false;
+                self.group_error_message = None;
+                self.show_add_group_modal = false; // Закрываем модалку
 
                 Task::perform(
                     async move {
-                        task::spawn_blocking(move || {
-                            let conn = Connection::open("db_platform")
-                                .map_err(|e| format!("Не удалось открыть БД: {}", e))?; // <-- map_err здесь
-
-                            let course_id = new_group_course_id
-                                .ok_or_else(|| "Не выбран курс".to_string())?;
-                            let teacher_id = new_group_teacher_id
-                                .ok_or_else(|| "Не выбран преподаватель".to_string())?;
-
-                            // Теперь вызываем db::insert_group с ID напрямую
-                            db::insert_group(&conn, &new_group_name_clone, course_id, teacher_id) // <--- ПЕРЕДАЕМ ID
-                                .map_err(|e| format!("Ошибка добавления группы: {}", e)) // <-- map_err здесь
-                        }).await // .await для tokio::task::spawn_blocking
-                            .map_err(|join_err| { // <-- map_err для JoinHandle
-                                eprintln!("Блокирующая задача для добавления группы завершилась ошибкой: {:?}", join_err);
-                                format!("Ошибка выполнения операции: {}", join_err)
-                            })? // <-- ? в конце для обработки Result<Result<...>, ...>
+                        tokio::task::spawn_blocking(move || {
+                            let conn = rusqlite::Connection::open("db_platform")
+                                .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
+                            // Вызов функции БД теперь корректен с i32
+                            db::insert_group(&conn, &group_name_clone, group_course_id, group_teacher_id)
+                                .map_err(|e| format!("Ошибка добавления группы: {}", e))?;
+                            Ok(()) // Возвращаем Ok(()) если все успешно
+                        }).await
+                            .map_err(|join_err| format!("Ошибка выполнения задачи: {:?}", join_err))?
                     },
-                    |result: Result<(), String>| { // Явно укажите тип результата
+                    |result: Result<(), String>| {
                         match result {
-                            Ok(_) => Message::LoadGroups,
-                            Err(e) => {
-                                eprintln!("Ошибка при добавлении группы: {}", e);
-                                Message::Er(e)
-                            }
+                            Ok(_) => Message::LoadAllGroups, // Обновить список групп
+                            Err(e) => Message::ErrorOccurred(e),
                         }
                     }
                 )
             }
+
             Message::CourseLessonsLoaded(result) => {
                 match result {
                     Ok(lessons) => {
@@ -1440,50 +1743,172 @@ impl App {
                 Task::none()
             }
             Message::OpenManageStudentsModal(group_id) => {
-                // Эти операции должны быть асинхронными
-                let conn = Connection::open("db_platform").unwrap();
-                let students = db::get_students_for_group(&conn, group_id);
-                let all_students = db::get_all_student_names(&conn);
-
-                self.selected_group_id = Some(group_id);
+                println!("DEBUG: Открываем модальное окно 'Состав' для группы ID: {}", group_id);
                 self.is_manage_students_modal_open = true;
-                self.group_students = students.expect("Failed to get students for group");
-                self.all_students = all_students.expect("Failed to get all student names");
-                self.selected_student_to_add = None;
-                Task::none() // Возвращаем Task::none()
+                self.current_manage_students_group_id = Some(group_id); // Сохраняем ID текущей группы
+
+                // Запускаем асинхронную задачу для загрузки студентов В ТЕКУЩЕЙ ГРУППЕ
+                let group_id_for_task = group_id; // Копируем для async move
+                let task_students_in_group = Task::perform(
+                    async move {
+                        task::spawn_blocking(move || {
+                            let conn = Connection::open("db_platform")
+                                .map_err(|e| format!("Не удалось открыть БД для студентов группы: {}", e))?;
+                            // Вызываем функцию для загрузки студентов конкретной группы
+                            db::get_students_in_group(&conn, group_id_for_task)
+                                .map_err(|e| format!("Ошибка загрузки студентов в группе: {}", e))
+                        })
+                            .await
+                            .unwrap_or_else(|join_err| Err(format!("Ошибка выполнения задачи студентов в группе: {:?}", join_err)))
+                    },
+                    Message::StudentsInGroupLoaded // Сообщение, когда студенты в группе загружены
+                );
+
+                // Запускаем асинхронную задачу для загрузки студентов БЕЗ ГРУППЫ (для PickList)
+                let task_students_without_group = Task::perform(
+                    async {
+                        task::spawn_blocking(move || {
+                            let conn = Connection::open("db_platform")
+                                .map_err(|e| format!("Не удалось открыть БД для студентов без группы: {}", e))?;
+                            // Вызываем функцию для загрузки студентов без группы
+                            db::get_students_without_group(&conn)
+                                .map_err(|e| format!("Ошибка загрузки студентов без группы: {}", e))
+                        })
+                            .await
+                            .unwrap_or_else(|join_err| Err(format!("Ошибка выполнения задачи студентов без группы: {:?}", join_err)))
+                    },
+                    Message::StudentsWithoutGroupLoaded // Сообщение, когда студенты без группы загружены
+                );
+
+                // Возвращаем обе задачи, чтобы они выполнялись параллельно
+                Task::batch(vec![task_students_in_group, task_students_without_group])
+            }
+            Message::StudentsInGroupLoaded(result) => {
+                match result {
+                    Ok(students) => {
+                        self.students_in_current_group_modal = students;
+                        println!("DEBUG: Студенты в текущей группе загружены: {} шт.", self.students_in_current_group_modal.len());
+                    },
+                    Err(e) => {
+                        eprintln!("ERROR: Не удалось загрузить студентов в группе: {}", e);
+                        self.error_message = e.to_string();
+                    }
+                }
+                Task::none()
+            }
+
+            Message::StudentsWithoutGroupLoaded(result) => {
+                match result {
+                    Ok(students) => {
+                        self.students_without_group = students;
+                        println!("DEBUG: Студенты без группы загружены: {} шт.", self.students_without_group.len());
+                    },
+                    Err(e) => {
+                        eprintln!("ERROR: Не удалось загрузить студентов без группы: {}", e);
+                        self.error_message = e.to_string();
+                    }
+                }
+                Task::none()
             }
             Message::CloseManageStudentsModal => {
+                println!("DEBUG: Закрываем модальное окно 'Состав'.");
                 self.is_manage_students_modal_open = false;
-                self.selected_group_id = None;
-                self.group_students.clear();
+                self.current_manage_students_group_id = None;
+                self.students_in_current_group_modal.clear(); // Очищаем список студентов
+                self.students_without_group.clear(); // Очищаем список для PickList
                 self.selected_student_to_add = None;
                 Task::none()
             }
 
-            Message::StudentToAddSelected(student_opt) => {
-                self.selected_student_to_add = student_opt;
+            Message::StudentToAddSelected(student_opt_from_picklist) => {
+                self.selected_student_to_add = student_opt_from_picklist;
                 Task::none()
             }
 
             Message::AddStudent => {
-                // Эта операция должна быть асинхронной
-                let conn = Connection::open("db_platform").unwrap();
-                if let (Some(group_id), Some(student_name)) = (self.selected_group_id, &self.selected_student_to_add) {
-                    db::add_student_to_group(&conn, group_id, student_name).unwrap();
-                    self.group_students = db::get_students_for_group(&conn, group_id).expect("Failed to get students for group after adding");
-                    self.selected_student_to_add = None;
-                }
-                Task::none() // Возвращаем Task::none()
-            }
+                // Получаем ID группы из текущего состояния модалки
+                let group_id = if let Some(id) = self.current_manage_students_group_id {
+                    id
+                } else {
+                    // Используем Message::ErrorOccurred
+                    return Task::done(Message::ErrorOccurred("Не выбрана группа для добавления студента.".to_string()));
+                };
 
-            Message::RemoveStudent(student_name) => {
-                // Эта операция должна быть асинхронной
-                let conn = Connection::open("db_platform").unwrap();
-                if let Some(group_id) = self.selected_group_id {
-                    db::remove_student_from_group(&conn, group_id, &student_name).unwrap();
-                    self.group_students = db::get_students_for_group(&conn, group_id).expect("Failed to get students for group after removing");
-                }
-                Task::none() // Возвращаем Task::none()
+                // Получаем ID студента, выбранного в PickList
+                let student_id = if let Some(student) = self.selected_student_to_add.take() {
+                    student.id // .take() забирает значение из Option, оставляя None
+                } else {
+                    // Используем Message::ErrorOccurred
+                    return Task::done(Message::ErrorOccurred("Не выбран студент для добавления.".to_string()));
+                };
+
+                println!("DEBUG: Попытка добавить студента ID: {} в группу ID: {}", student_id, group_id);
+
+                // Клонируем group_id для использования в асинхронной задаче
+                let group_id_for_task = group_id;
+
+                // Запускаем асинхронную задачу для добавления студента в БД
+                Task::perform(
+                    async move {
+                        task::spawn_blocking(move || {
+                            let conn = Connection::open("db_platform")
+                                .map_err(|e| format!("Не удалось открыть БД для добавления студента: {}", e))?;
+                            db::add_student_to_group(&conn, student_id, group_id_for_task) // Используем group_id_for_task
+                                .map_err(|e| format!("Ошибка добавления студента в группу: {}", e))
+                        })
+                            .await
+                            .unwrap_or_else(|join_err| Err(format!("Ошибка выполнения задачи добавления студента: {:?}", join_err)))
+                    },
+                    move |result| { // Добавляем 'move' к замыканию, чтобы захватить group_id_for_task
+                        match result {
+                            Ok(_) => {
+                                println!("DEBUG: Студент успешно добавлен. Перезагружаем списки.");
+                                // После успешного добавления перезагружаем оба списка студентов в модалке
+                                Message::OpenManageStudentsModal(group_id_for_task) // Перезапускаем открытие модалки
+                            },
+                            Err(e) => {
+                                eprintln!("ERROR: Не удалось добавить студента: {}", e);
+                                Message::Er(e) // <-- ИСПРАВЛЕНО: используем ErrorOccurred
+                            }
+                        }
+                    }
+                )
+            }
+            Message::RemoveStudentFromGroup(student_id, group_id) => {
+                println!("DEBUG: Попытка удалить студента ID: {} из группы ID: {}", student_id, group_id);
+
+                // Клонируем group_id для использования в асинхронной задаче и в замыкании результата
+                // Поскольку i32 является Copy, это создаст независимую копию.
+                let group_id_for_async_task = group_id; // Для асинхронной задачи db
+                let group_id_for_result_closure = group_id; // Для замыкания |result|
+
+                Task::perform(
+                    async move { // 'move' здесь гарантирует, что student_id и group_id_for_async_task перемещаются в этот async блок
+                        tokio::task::spawn_blocking(move || { // 'move' здесь гарантирует, что student_id и group_id_for_async_task перемещаются в этот blocking блок
+                            let conn = Connection::open("db_platform")
+                                .map_err(|e| format!("Не удалось открыть БД для удаления студента: {}", e))?;
+                            db::remove_student_from_group(&conn, student_id, group_id_for_async_task) // Используем переданные значения
+                                .map_err(|e| format!("Ошибка удаления студента из группы: {}", e))
+                        })
+                            .await
+                            .unwrap_or_else(|join_err| Err(format!("Ошибка выполнения задачи удаления студента: {:?}", join_err)))
+                    },
+                    // <--- ДОБАВЛЯЕМ 'move' СЮДА
+                    move |result| { // 'move' гарантирует, что group_id_for_result_closure перемещается в это замыкание
+                        match result {
+                            Ok(_) => {
+                                println!("DEBUG: Студент успешно удален. Перезагружаем списки.");
+                                // Используем перемещенную копию group_id
+                                Message::OpenManageStudentsModal(group_id_for_result_closure)
+                            },
+                            Err(e) => {
+                                eprintln!("ERROR: Не удалось удалить студента: {}", e);
+                                // ИСПРАВЛЕНИЕ: используем Message::ErrorOccurred
+                                Message::ErrorOccurred(e)
+                            }
+                        }
+                    }
+                )
             }
             Message::ShowParentChildren(parent_email) => {
                 // Эта операция должна быть асинхронной
@@ -2151,35 +2576,61 @@ impl App {
                 Task::none()
             }
             Message::AddAssignment => {
-                let conn = Connection::open("db_platform").unwrap();
-                if let Some(current_lesson) = &self.current_lesson_for_assignments {
-                    if self.new_assignment_title.is_empty() || self.new_assignment_description.is_empty() || self.new_assignment_type.is_none() {
-                        self.assignment_error_message = Some("Все поля (название, описание, тип) для нового задания должны быть заполнены.".to_string());
-                    }
-
-                    // Преобразуем выбранный AssignmentType в строку для сохранения в БД
-                    let assignment_type_str = self.new_assignment_type.unwrap().to_string();
-                    match db::add_assignment(&conn, current_lesson.id, &self.new_assignment_title, &self.new_assignment_description, &assignment_type_str) {
-                        Ok(_) => {
-                            match db::get_assignments_for_lesson(&conn, current_lesson.id) {
-                                Ok(assignments) => self.lesson_assignments = assignments,
-                                Err(e) => self.assignment_error_message = Some(format!("Не удалось перезагрузить задания: {}", e)),
-                            }
-                            self.new_assignment_title.clear();
-                            self.new_assignment_description.clear();
-                            self.new_assignment_type = None;
-                            self.assignment_error_message = None;
-                            Task::none()
-                        }
-                        Err(e) => {
-                            self.assignment_error_message = Some(format!("Ошибка добавления задания: {}", e));
-                            Task::none()
-                        }
-                    }
-                } else {
+                // Проверка наличия выбранного занятия
+                let Some(current_lesson) = &self.current_lesson_for_assignments else {
                     self.assignment_error_message = Some("Нет выбранного занятия для добавления задания.".to_string());
-                    Task::none()
+                    return Task::none();
+                };
+
+                // Проверка на пустые поля перед добавлением
+                if self.new_assignment_title.is_empty() {
+                    self.assignment_error_message = Some("Название задания не может быть пустым.".to_string());
+                    return Task::none();
                 }
+                if self.new_assignment_description.is_empty() {
+                    self.assignment_error_message = Some("Описание задания не может быть пустым.".to_string());
+                    return Task::none();
+                }
+                let Some(assignment_type_enum) = self.new_assignment_type else {
+                    self.assignment_error_message = Some("Необходимо выбрать тип задания.".to_string());
+                    return Task::none();
+                };
+
+                // Очищаем предыдущее сообщение об ошибке, если все проверки пройдены
+                self.assignment_error_message = None;
+
+                let lesson_id = current_lesson.id;
+                let new_assignment_title_clone = self.new_assignment_title.clone();
+                let new_assignment_description_clone = self.new_assignment_description.clone();
+                let assignment_type_str = assignment_type_enum.to_string(); // Преобразуем enum в String
+
+                // Очищаем поля формы до выполнения Task
+                self.new_assignment_title.clear();
+                self.new_assignment_description.clear();
+                self.new_assignment_type = None; // Сброс выбранного типа
+
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            let conn = Connection::open("db_platform")
+                                .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
+                            db::add_assignment(&conn, lesson_id, &new_assignment_title_clone, &new_assignment_description_clone, &assignment_type_str)
+                                .map_err(|e| format!("Ошибка добавления задания: {}", e))?;
+                            // После успешного добавления, загружаем обновленный список заданий
+                            db::get_assignments_for_lesson(&conn, lesson_id)
+                                .map_err(|e| format!("Не удалось перезагрузить задания после добавления: {}", e))
+                        }).await
+                            .map_err(|join_err| format!("Ошибка выполнения задачи: {:?}", join_err))?
+                    },
+                    |result: Result<Vec<crate::app::Assignment>, String>| { // Ожидаем Result<Vec<Assignment>, String>
+                        match result {
+                            Ok(assignments) => {
+                                Message::AssignmentsLoaded(Ok(assignments)) // Отправляем новое сообщение с загруженными заданиями
+                            }
+                            Err(e) => Message::ErrorOccurred(e),
+                        }
+                    }
+                )
             }
             Message::DeleteAssignment(assignment_id) => {
                 let conn = Connection::open("db_platform").unwrap();
@@ -2327,42 +2778,60 @@ impl App {
                 match result {
                     Ok(assignments) => {
                         self.lesson_assignments = assignments;
-                        self.assignment_edit_error_message = None; // Убедитесь, что нет ошибок от предыдущих операций
+                        self.assignment_error_message = None; // Очищаем ошибки после успешной загрузки
                     }
                     Err(e) => {
-                        eprintln!("Ошибка загрузки заданий: {}", e);
-                        // self.assignment_edit_error_message = Some(e); // Можно отобразить ошибку пользователю
+                        self.assignment_error_message = Some(format!("Ошибка загрузки заданий: {}", e));
                     }
                 }
                 Task::none()
             }
-            Message::LoadTeacherGroups => {
-                if let Some(user) = &self.current_user { // Используйте current_user для получения email и типа
-                    if user.user_type == "teacher" {
-                        // ИЗМЕНЕНИЕ ЗДЕСЬ: Возвращаем Task::perform напрямую
-                        return Task::perform(load_teacher_groups(user.email.clone()), Message::TeacherGroupsLoaded);
-                    }
-                }
-                // Если условие не выполнено или user не найден, возвращаем Task::none()
-                Task::none()
+            Message::LoadTeacherGroups(teacher_id_to_load) => {
+                println!("DEBUG: Запущена асинхронная загрузка групп для преподавателя ID: {}", teacher_id_to_load);
+                Task::perform(
+                    async move {
+                        // Вызываем `spawn_blocking` напрямую из `task`
+                        spawn_blocking(move || { // <-- Меняем на `task::spawn_blocking`
+                            let conn = Connection::open("db_platform")
+                                .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
+                            db::get_teacher_groups_with_details(&conn, teacher_id_to_load)
+                                .map_err(|e| format!("Ошибка загрузки групп из БД: {}", e))
+                        }).await.unwrap_or_else(|join_err| {
+                            Err(format!("Ошибка выполнения блокирующей задачи: {:?}", join_err))
+                        })
+                    },
+                    Message::TeacherGroupsLoaded
+                )
+            }
+            Message::LoadAllGroups => {
+                println!("DEBUG: Запущена асинхронная загрузка ВСЕХ групп (для администратора).");
+                Task::perform(
+                    async { // `async` без `move`, так как не захватывает внешние переменные
+                        spawn_blocking(move || {
+                            let conn = Connection::open("db_platform")
+                                .map_err(|e| format!("Не удалось открыть БД для загрузки ВСЕХ групп: {}", e))?;
+                            db::get_all_groups(&conn) // <-- Вызываем новую функцию
+                                .map_err(|e| format!("Ошибка загрузки ВСЕХ групп из БД: {}", e))
+                        })
+                            .await
+                            .unwrap_or_else(|join_err| {
+                                Err(format!("Ошибка выполнения блокирующей задачи загрузки ВСЕХ групп: {:?}", join_err))
+                            })
+                    },
+                    Message::TeacherGroupsLoaded // Используем то же сообщение для результата, но группы будут ВСЕ
+                )
             }
             Message::TeacherGroupsLoaded(result) => {
                 match result {
                     Ok(groups) => {
-                        self.teacher_groups = groups;
-                        // Опционально выберите первую группу или группу по умолчанию
-                        if let Some(first_group) = self.teacher_groups.first().cloned() {
-                            // ИЗМЕНЕНИЕ ЗДЕСЬ: Возвращаем результат self.update(), который сам является Task
-                            return self.update(Message::SelectGroupForClasses(first_group));
-                        }
-                    }
+                        self.teacher_groups = groups; // <-- Теперь self.teacher_groups будет содержать либо группы преподавателя, либо ВСЕ группы
+                        println!("DEBUG: Группы успешно загружены: {} шт.", self.teacher_groups.len());
+                    },
                     Err(e) => {
-                        eprintln!("Error loading teacher groups: {}", e);
-                        // Обработка ошибки, возможно, показ сообщения
-                        self.teacher_error_message = Some(format!("Ошибка загрузки групп: {}", e)); // Добавим сообщение об ошибке
+                        eprintln!("ERROR: Не удалось загрузить группы: {}", e);
+                        self.error_message = e.to_string();
                     }
                 }
-                // Если не было других Task (например, при ошибке или если нет групп), возвращаем Task::none()
                 Task::none()
             }
             Message::LoadGroupProvenLessons => {
@@ -2373,6 +2842,68 @@ impl App {
                 Task::none()
             }
             Message::NoOp => {Task::none()}
+            Message::OpenGroupLessonsModal(group_id, course_id) => {
+                self.show_group_lessons_modal = true;
+                self.group_lessons_modal_lessons.clear();
+                self.group_lessons_modal_past_sessions.clear();
+
+                // Ищем название группы для заголовка модального окна
+                if let Some(group_found) = self.teacher_groups.iter().find(|g| g.id == group_id) {
+                    self.group_lessons_modal_group_name = group_found.name.clone();
+                } else {
+                    self.group_lessons_modal_group_name = "Неизвестная группа".to_string();
+                }
+
+                Task::perform(
+                    async move {
+                        let result = task::spawn_blocking(move || {
+                            let conn = Connection::open("db_platform")
+                                .map_err(|e| format!("Не удалось открыть БД для загрузки занятий группы: {}", e))?;
+
+                            // Загружаем уроки, которые ЕЩЕ НЕ ПРОВЕДЕНЫ для этой группы
+                            let available_lessons = db::get_lessons_for_course_and_group(&conn, course_id, group_id)
+                                .map_err(|e| format!("Ошибка загрузки доступных уроков: {}", e))?;
+
+                            // Загружаем уроки, которые УЖЕ ПРОВЕДЕНЫ для этой группы
+                            let past_sessions = db::get_past_sessions_for_group(&conn, group_id)
+                                .map_err(|e| format!("Ошибка загрузки прошедших занятий: {}", e))?;
+
+                            Ok((available_lessons, past_sessions))
+                        }).await;
+
+                        // Обработка ошибок из spawn_blocking
+                        result.unwrap_or_else(|join_err| {
+                            Err(format!("Блокирующая задача завершилась ошибкой: {:?}", join_err))
+                        })
+                    },
+                    Message::GroupLessonsModalLoaded // Отправляем результат в новое сообщение
+                )
+            }
+
+            Message::GroupLessonsModalLoaded(result) => {
+                match result {
+                    Ok((lessons, past_sessions)) => {
+                        self.group_lessons_modal_lessons = lessons;
+                        self.group_lessons_modal_past_sessions = past_sessions;
+                        Task::none() // Больше никаких задач не нужно
+                    }
+                    Err(e) => {
+                        eprintln!("Ошибка загрузки занятий для модального окна: {}", e);
+                        self.error_message = e.to_string();
+                        self.show_group_lessons_modal = false; // Закрываем модальное окно при ошибке
+                        Task::none()
+                    }
+                }
+            }
+
+            Message::CloseGroupLessonsModal => {
+                self.show_group_lessons_modal = false;
+                self.group_lessons_modal_lessons.clear();
+                self.group_lessons_modal_past_sessions.clear();
+                self.group_lessons_modal_group_name.clear();
+                Task::none()
+            }
+            Message::ErrorOccurred(_) => {Task::none()}
         }
 }
 

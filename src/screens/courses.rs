@@ -55,9 +55,7 @@ pub fn courses_screen(app: &App) -> Container<Message> {
         .filter(|u| u.user_type == "teacher") // Фильтруйте по типу, если нужно
         .cloned()
         .collect();
-
-
-
+    
     let filter = app.course_filter_text.to_lowercase();
     let filtered_courses: Vec<Course> = courses
         .into_iter()
@@ -121,7 +119,7 @@ pub fn courses_screen(app: &App) -> Container<Message> {
                 let lesson_row = Row::new()
                     .spacing(10)
                     .align_y(Alignment::Center)
-                    .push(Text::new(format!("{}. {}", lesson.number.unwrap_or(0), lesson.title)))
+                    .push(Text::new(format!("{}. {}", lesson.number, lesson.title)))
                     .push(horizontal_space())
                     .push(button("Задания").on_press(Message::ShowAssignmentsModal(lesson.clone())))
                     .push(button("X").on_press(Message::DeleteLesson(lesson.id)));
@@ -170,7 +168,7 @@ pub fn courses_screen(app: &App) -> Container<Message> {
     // --- Модальное окно для ЗАДАНИЙ ---
     if app.show_assignments_modal {
         if let Some(lesson) = &app.current_lesson_for_assignments {
-            let assignments_modal_title_text = format!("Задания для: {} {}", lesson.number.unwrap_or(0), lesson.title);
+            let assignments_modal_title_text = format!("Задания для: {} {}", lesson.number, lesson.title);
 
             let mut assignments_list_col = Column::new().spacing(5);
             if app.lesson_assignments.is_empty() {
@@ -241,7 +239,7 @@ pub fn courses_screen(app: &App) -> Container<Message> {
         }
     }
 
-    // --- НОВОЕ: Модальное окно для ДЕТАЛЕЙ ЗАДАНИЯ ---
+    // Модальное окно для ДЕТАЛЕЙ ЗАДАНИЯ 
     if app.show_assignment_detail_modal {
         if let Some(selected_assignment) = &app.selected_assignment_for_detail {
             let detail_modal_title = format!("Редактирование: {}", app.editing_assignment_title); // Используем редактируемый заголовок
@@ -382,6 +380,7 @@ pub fn courses_screen(app: &App) -> Container<Message> {
             .push(TextInput::new("Описание курса", desc_val).on_input(move |s| desc_ch_msg(s)))
             .push(PickList::new(instructors.clone(), instructor_val, move |name| instr_ch_msg(Some(name))).placeholder("Выберите преподавателя"))
             .push(PickList::new(Level::ALL.to_vec(), level_val, move |level| level_ch_msg(level)).placeholder("Выберите уровень"))
+            .push(Text::new(app.course_error_message.clone().unwrap_or_default()))
             .push(
                 Row::new().spacing(10)
                     .push(Button::new(Text::new("Отмена")).on_press(cancel_message.clone()))
@@ -394,7 +393,7 @@ pub fn courses_screen(app: &App) -> Container<Message> {
 
         let course_modal_overlay = Container::new(
             mouse_area(Container::new(course_modal_container).center(Length::Fill))
-                .on_press(if is_editing { Message::Er("".to_string()) } else { cancel_message })
+                .on_press(Message::Er("".to_string()))
         )
             .width(Length::Fill).height(Length::Fill)
             .style(move |_| background(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.7 }));

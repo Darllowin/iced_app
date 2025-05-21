@@ -85,7 +85,7 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
             .push(Text::new(format!("Тип: {}", user.user_type)));
         
         if user.user_type == "student".to_string() {
-            if let Some(group_names) = &user.group { // child.group теперь Option<String> из БД
+            if let Some(group_names) = &user.group_id { // child.group теперь Option<String> из БД
                 // Отображаем строку с именами групп
                 info = info.push(Text::new(format!("Группа: {}", group_names)));
             } else {
@@ -95,7 +95,7 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
         }
 
         if user.user_type == "teacher".to_string() {
-            if let Some(group_names) = &user.group { // child.group теперь Option<String> из БД
+            if let Some(group_names) = &user.group_id { // child.group теперь Option<String> из БД
                 // Отображаем строку с именами групп
                 info = info.push(Text::new(format!("Группа: {}", group_names)));
             } else {
@@ -211,7 +211,7 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
                 .push(Text::new(format!("Email: {}", &child.email)))
                 .push(Text::new(format!("Дата рождения: {}", &child.birthday)))
                 .push(
-                    if let Some(group_names) = &child.group {
+                    if let Some(group_names) = &child.group_id {
                         // Отображаем строку с именами групп
                         Text::new(format!("Группа: {}", group_names))
                     } else {
