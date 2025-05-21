@@ -1,5 +1,5 @@
 use iced::{widget::{column, text, Container, vertical_space}, Length, Center, Theme};
-use iced::widget::pick_list;
+use iced::widget::{checkbox, pick_list};
 use crate::app::{App, Message};
 
 pub fn settings_screen(_app: &App) -> Container<Message> {

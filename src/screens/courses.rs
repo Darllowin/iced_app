@@ -6,9 +6,9 @@ use iced::{
     Alignment, Length
 };
 use iced::widget::container::{background, bordered_box};
-use iced::widget::{button, horizontal_space, row, text, PickList, Rule};
+use iced::widget::{button, horizontal_space, row, text, PickList, Rule, TextEditor};
 use rusqlite::Connection;
-use crate::app::{App, Course, Level, Message, Lesson, Screen, AssignmentType}; // Импортируем Lesson
+use crate::app::{App, Course, Level, Message, Lesson, Screen, AssignmentType, TextInputOrEditorInput, UserInfo}; // Импортируем Lesson
 use crate::db;
 
 // <-- Обновляем headrbar, чтобы кнопка "Занятия" отправляла правильное сообщение
@@ -30,7 +30,7 @@ fn headrbar(course: Course) -> Row<'static, Message> { // Передаем те�
 fn content(course: Course, app: &App) -> Column<Message> {
     let content_col = Column::new()
         .spacing(5)
-        .push(Text::new(format!("Преподаватель: {}", course.instructor.unwrap_or_default())).size(20))
+        .push(Text::new(format!("Преподаватель: {}", course.instructor_name.unwrap_or_default())).size(20)) // <--- ИЗМЕНЕНИЕ ЗДЕСЬ
         .push(Text::new(format!("Уровень: {}", course.level.as_ref().map_or(String::new(), |l| l.to_string()))).size(18))
         .push(Text::new(format!("Занятий: {}", course.lesson_count)).size(18))
         .push(Text::new(""))
@@ -51,7 +51,11 @@ pub fn courses_screen(app: &App) -> Container<Message> {
         println!("!!! Ошибка при загрузке курсов из БД: {:?}", e);
         vec![]
     });
-    let instructors = db::get_all_users(&conn).unwrap_or_default();
+    let instructors: Vec<UserInfo> = db::get_all_users(&conn).unwrap_or_default().iter()
+        .filter(|u| u.user_type == "teacher") // Фильтруйте по типу, если нужно
+        .cloned()
+        .collect();
+
 
 
     let filter = app.course_filter_text.to_lowercase();
@@ -60,8 +64,9 @@ pub fn courses_screen(app: &App) -> Container<Message> {
         .filter(|c| {
             c.title.to_lowercase().contains(&filter)
                 || c.description.to_lowercase().contains(&filter)
-                || c.instructor.clone().unwrap_or_default().to_lowercase().contains(&filter)
-                || c.level.clone().unwrap_or_default().to_lowercase().contains(&filter) // Предполагаем, что level это String в Course
+                // <--- ИЗМЕНЕНИЕ ЗДЕСЬ: Используем instructor_name
+                || c.instructor_name.clone().unwrap_or_default().to_lowercase().contains(&filter)
+                || c.level.clone().unwrap_or_default().to_lowercase().contains(&filter)
         })
         .collect();
 
@@ -87,8 +92,7 @@ pub fn courses_screen(app: &App) -> Container<Message> {
 
     for course in filtered_courses {
         let course_content = Column::new().push(
-            Container::new(
-                Column::new()
+            Container::new(Column::new()
                     .push(Container::new(headrbar(course.clone())).padding(10)).push(content(course.clone(), &app))).style(move |_| bordered_box(&app.theme))
                     
                 )
@@ -125,7 +129,7 @@ pub fn courses_screen(app: &App) -> Container<Message> {
             });
 
             let scrollable_lessons = Scrollable::new(
-                Container::new(lessons_list_col).style(move |_| bordered_box(&app.theme)).padding(10)
+                Container::new(lessons_list_col).style(move |_| bordered_box(&app.theme)).padding(10).width(Length::Fill)
             ).height(Length::FillPortion(3)); // Больше места для списка
 
             let add_lesson_form = Column::new()
@@ -175,9 +179,10 @@ pub fn courses_screen(app: &App) -> Container<Message> {
                 for assignment in &app.lesson_assignments {
                     let assignment_row = Row::new()
                         .spacing(10)
+                        .width(Length::Fill)
                         .align_y(Alignment::Center)
                         .push(Text::new(format!("{} ({})", assignment.title, assignment.assignment_type)).width(Length::FillPortion(3)))
-                        .push(Text::new(&assignment.description).width(Length::FillPortion(5))) // Описание может быть длинным
+                        .push(Text::new(&assignment.description).width(Length::FillPortion(5)).height(Length::Fixed(30.0))) // Описание может быть длинным
                         .push(horizontal_space())
                         .push(button("Открыть").on_press(Message::ShowAssignmentDetailModal(assignment.clone())))
                         .push(button("X").on_press(Message::DeleteAssignment(assignment.id)));
@@ -224,11 +229,11 @@ pub fn courses_screen(app: &App) -> Container<Message> {
             let assignments_modal_container = Container::new(assignments_modal_col)
                 .style(move |_| bordered_box(&app.theme))
                 .padding(20)
-                .height(Length::Fixed(550.0)) // Высота модалки заданий
-                .width(Length::Fixed(700.0));  // Ширина модалки заданий
+                .height(Length::Fixed(600.0)) // Высота модалки заданий
+                .width(Length::Fixed(800.0));  // Ширина модалки заданий
 
             let assignments_modal_overlay = Container::new(
-                Container::new(assignments_modal_container).center(Length::Fill)
+                Container::new(assignments_modal_container).center(Length::Fill).width(Length::Fill)
             )
                 .width(Length::Fill).height(Length::Fill)
                 .style(move |_| background(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.7 }));
@@ -239,41 +244,93 @@ pub fn courses_screen(app: &App) -> Container<Message> {
     // --- НОВОЕ: Модальное окно для ДЕТАЛЕЙ ЗАДАНИЯ ---
     if app.show_assignment_detail_modal {
         if let Some(selected_assignment) = &app.selected_assignment_for_detail {
-            let detail_modal_title = format!("Детали задания: {}", selected_assignment.title);
+            let detail_modal_title = format!("Редактирование: {}", app.editing_assignment_title); // Используем редактируемый заголовок
 
-            let assignment_details_content = Column::new()
-                .spacing(10)
-                .push(Text::new(format!("Тип: {}", selected_assignment.assignment_type)).size(18))
-                .push(Rule::horizontal(5))
-                .push(Text::new("Описание:").size(18))
-                .push(Scrollable::new(Text::new(&selected_assignment.description).size(16)).height(Length::FillPortion(1))) // Описание может быть длинным
-                .width(Length::Fill);
+            let mut content_specific_to_type = Column::new().spacing(10);
+
+            // Поле для редактирования названия задания (общее для всех типов)
+            content_specific_to_type = content_specific_to_type
+                .push(Text::new("Название задания:").size(16))
+                .push(TextInput::new("Введите название...", &app.editing_assignment_title)
+                    .on_input(Message::EditingAssignmentTitleChanged));
+
+            // Определяем, какой тип задания редактируется (сравниваем строку из БД с .to_string() от enum)
+            let assignment_type_str = &selected_assignment.assignment_type; // Это String
+
+            if *assignment_type_str == AssignmentType::Lecture.to_string() {
+                content_specific_to_type = content_specific_to_type
+                    .push(Text::new("Текст лекции:").size(16))
+                    // *** ИЗМЕНЕНО: Используем TextEditor для Лекции ***
+                    .push(Scrollable::new(
+                        TextEditor::new(&app.editing_assignment_description_content) // Привязываем к TextEditor контенту
+                            .placeholder("Введите текст лекции...") // Placeholder
+                            // Используем on_action и оборачиваем в TextInputOrEditorInput::TextEditor
+                            .on_action(|action| Message::EditingAssignmentDescriptionChanged(TextInputOrEditorInput::TextEditor(action)))
+                        ).height(Length::Fixed(300.0)) 
+                    )
+            } else if *assignment_type_str == AssignmentType::Practice.to_string() {
+                content_specific_to_type = content_specific_to_type
+                    .push(Text::new("Описание практического задания:").size(16))
+                    // *** ИЗМЕНЕНО: Используем TextEditor для Практики ***
+                    .push(Scrollable::new(
+                        TextEditor::new(&app.editing_assignment_description_content) // Привязываем к TextEditor контенту
+                            .placeholder("Введите описание...") // Placeholder
+                            // Используем on_action и оборачиваем в TextInputOrEditorInput::TextEditor
+                            .on_action(|action| Message::EditingAssignmentDescriptionChanged(TextInputOrEditorInput::TextEditor(action)))
+                        ).height(Length::Fixed(300.0))
+                    );
+            } else if *assignment_type_str == AssignmentType::Test.to_string() {
+                content_specific_to_type = content_specific_to_type
+                    .push(Text::new("Общее описание/инструкции к тесту:").size(16))
+                    // *** ИЗМЕНЕНО: Используем поле для TextInput и оборачиваем ввод ***
+                    .push(TextInput::new("Введите описание...", &app.editing_assignment_description_text_input) // Привязываем к TextInput String полю
+                        // Используем on_input и оборачиваем в TextInputOrEditorInput::TextInput
+                        .on_input(|s| Message::EditingAssignmentDescriptionChanged(TextInputOrEditorInput::TextInput(s))))
+                    .push(Rule::horizontal(5))
+                    .push(Text::new("Примечание: Детальное создание вопросов и ответов для тестов будет доступно в следующих версиях.").size(14));
+            } else {
+                // Для неизвестных или других типов просто показываем описание
+                content_specific_to_type = content_specific_to_type
+                    .push(Text::new("Описание:").size(16))
+                    // *** ИЗМЕНЕНО: Используем поле для TextInput и оборачиваем ввод ***
+                    .push(TextInput::new("...", &app.editing_assignment_description_text_input) // Привязываем к TextInput String полю
+                        // Используем on_input и оборачиваем в TextInputOrEditorInput::TextInput
+                        .on_input(|s| Message::EditingAssignmentDescriptionChanged(TextInputOrEditorInput::TextInput(s))));
+            }
 
             let mut detail_modal_col = Column::new()
                 .spacing(15)
                 .align_x(Alignment::Start)
                 .push(Text::new(detail_modal_title).size(22))
-                .push(Container::new(assignment_details_content).padding(10).style(move |_| bordered_box(&app.theme)))
+                .push(Container::new(Scrollable::new(content_specific_to_type)).padding(5).style(move |_| bordered_box(&app.theme)))
                 .push(Rule::horizontal(10));
 
-            // Кнопка закрытия
-            let close_button_row = Row::new().push(horizontal_space()).push(button("Закрыть").on_press(Message::CloseAssignmentDetailModal));
-            detail_modal_col = detail_modal_col.push(close_button_row);
+            if let Some(error_msg) = &app.assignment_edit_error_message {
+                detail_modal_col = detail_modal_col.push(Text::new(error_msg).size(16));
+            }
+
+            let buttons_row = Row::new()
+                .spacing(10)
+                .push(button("Отмена").on_press(Message::CloseAssignmentDetailModal))
+                .push(button("Сохранить").on_press(Message::SaveEditedAssignment));
+
+            detail_modal_col = detail_modal_col.push(buttons_row.align_y(Alignment::End)); // Выравнивание ряда кнопок
 
             let detail_modal_container = Container::new(detail_modal_col)
                 .style(move |_| bordered_box(&app.theme))
                 .padding(20)
-                .height(Length::Fixed(400.0)) // Размер модального окна деталей
-                .width(Length::Fixed(600.0));
+                .height(Length::Shrink) // Автоматическая высота, но не более экрана
+                .width(Length::Fixed(700.0)); // Ширина модалки редактирования
 
             let detail_modal_overlay = Container::new(
-                Container::new(detail_modal_container).center(Length::Fill)
+                Container::new(detail_modal_container).center(Length::Fill) // Центрируем модалку
             )
                 .width(Length::Fill).height(Length::Fill)
-                .style(move |_| background(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.7 })); // Еще темнее, так как поверх всех
+                .style(move |_| background(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.7 }));
             ui_stack = ui_stack.push(detail_modal_overlay);
         }
     }
+
 
     // --- Модальное окно для добавления/редактирования КУРСА ---
     if app.show_add_course_modal {
@@ -284,22 +341,37 @@ pub fn courses_screen(app: &App) -> Container<Message> {
         let cancel_message = if is_editing { Message::CancelEditingCourse } else { Message::ToggleAddCourseModal(false) };
 
         let (title_val, desc_val, instructor_val, level_val, title_ch_msg, desc_ch_msg, instr_ch_msg, level_ch_msg) : (
-            &String, &String, Option<String>, Option<Level>,
-            Box<dyn Fn(String) -> Message>, Box<dyn Fn(String) -> Message>,
-            Box<dyn Fn(Option<String>) -> Message>, Box<dyn Fn(Level) -> Message>
+            &String,
+            &String,
+            Option<UserInfo>, // <--- Теперь Option<UserInfo>
+            Option<Level>,
+            Box<dyn Fn(String) -> Message>,
+            Box<dyn Fn(String) -> Message>,
+            Box<dyn Fn(Option<UserInfo>) -> Message>, // <--- Теперь Option<UserInfo>
+            Box<dyn Fn(Level) -> Message>
         ) = if is_editing {
             (
-                &app.edit_course_title, &app.edit_course_description,
-                app.edit_course_instructor.clone(), Some(app.edit_course_level), // app.edit_course_level уже Level
-                Box::new(Message::EditCourseTitleChanged), Box::new(Message::EditCourseDescriptionChanged),
-                Box::new(Message::EditCourseInstructorChanged), Box::new(Message::EditCourseLevelChanged),
+                &app.edit_course_title,
+                &app.edit_course_description,
+                // Ищем UserInfo по ID
+                instructors.iter().find(|u| Some(u.id) == app.edit_course_teacher_id).cloned(), // <--- Используем edit_course_teacher_id
+                Some(app.edit_course_level),
+                Box::new(Message::EditCourseTitleChanged),
+                Box::new(Message::EditCourseDescriptionChanged),
+                Box::new(Message::EditCourseInstructorChanged),
+                Box::new(Message::EditCourseLevelChanged),
             )
         } else {
             (
-                &app.new_course_title, &app.new_course_description,
-                app.new_course_instructor.clone(), Some(app.new_course_level), // app.new_course_level уже Level
-                Box::new(Message::NewCourseTitleChanged), Box::new(Message::NewCourseDescriptionChanged),
-                Box::new(Message::NewCourseInstructorChanged), Box::new(Message::NewCourseLevelChanged),
+                &app.new_course_title,
+                &app.new_course_description,
+                // Ищем UserInfo по ID
+                instructors.iter().find(|u| Some(u.id) == app.new_course_teacher_id).cloned(), // <--- Используем new_course_teacher_id
+                Some(app.new_course_level),
+                Box::new(Message::NewCourseTitleChanged),
+                Box::new(Message::NewCourseDescriptionChanged),
+                Box::new(Message::NewCourseInstructorChanged),
+                Box::new(Message::NewCourseLevelChanged),
             )
         };
 

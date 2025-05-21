@@ -5,7 +5,8 @@ mod screens;
 use iced_aw::iced_fonts::{REQUIRED_FONT_BYTES};
 use app::App;
 
-fn main() -> iced::Result {
+#[tokio::main]
+async fn main() -> iced::Result {
     iced::application("Platform", App::update, App::view)
         .theme(|app: &App| app.theme.clone())
         .font(REQUIRED_FONT_BYTES)

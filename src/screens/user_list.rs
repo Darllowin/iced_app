@@ -5,15 +5,45 @@ use iced::{
 };
 use iced::advanced::image::Handle;
 use iced::widget::container::{background, bordered_box};
-use iced::widget::{horizontal_space, image, PickList};
+use iced::widget::{horizontal_space, image, text, PickList};
 use crate::app::{App, Message, DEFAULT_AVATAR};
 use crate::db;
 
 pub fn user_list_screen(app: &App) -> Container<Message> {
     let conn = rusqlite::Connection::open("db_platform").unwrap();
-    let users = db::get_all_users_for_list(&conn).unwrap_or_default();
+    let users = db::get_all_users_for_list(&conn, app.user_type_filter.as_deref()).unwrap_or_default();
 
     let mut list = Column::new().spacing(15);
+
+    let filter_options = vec![
+        "Все".to_string(), // Option to show all users
+        "student".to_string(),
+        "parent".to_string(),
+        "admin".to_string(),
+    ];
+
+    let current_filter_selection = app.user_type_filter.clone().unwrap_or_else(|| "Все".to_string());
+
+    let filter_picklist = PickList::new(
+        filter_options,
+        Some(current_filter_selection),
+        |selection| {
+            if selection == "Все" {
+                Message::UserTypeFilterChanged(None) // If "All" selected, set filter to None
+            } else {
+                Message::UserTypeFilterChanged(Some(selection)) // Otherwise, use the selected type
+            }
+        },
+    )
+        .placeholder("Фильтровать по типу");
+
+    let filter_row = Row::new()
+        .push(text("Фильтр: "))
+        .push(filter_picklist)
+        .align_y(Alignment::Center)
+        .spacing(10)
+        .width(Length::Fill)
+        .padding([0, 20]);
 
     for user in users {
         let avatar = if let Some(mut data) = user.avatar_data.clone() {
@@ -64,6 +94,16 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
             }
         }
 
+        if user.user_type == "teacher".to_string() {
+            if let Some(group_names) = &user.group { // child.group теперь Option<String> из БД
+                // Отображаем строку с именами групп
+                info = info.push(Text::new(format!("Группа: {}", group_names)));
+            } else {
+                // Если у ребенка нет групп
+                info = info.push(Text::new("Группа: не указана"));
+            }
+        }
+
         if user.user_type == "parent" {
             // user.child_count - это Option<i32> из БД
             if let Some(count) = user.child_count {
@@ -99,7 +139,9 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
         .width(Length::Fill)
         .height(Length::Fill);
 
-    let base = Container::new(scrollable)
+    let base = Container::new(
+        Column::new().push(filter_row.padding(10)).push(scrollable)
+    )
         .align_y(Alignment::Start)
         .width(Length::Fill)
         .height(Length::Fill);

@@ -2,7 +2,7 @@ use iced::{widget::{Button, Column, Container, Row, Stack, Text, TextInput, mous
 use iced::widget::{button, horizontal_space, image, row, text, Image, PickList};
 use iced::widget::container::{background, bordered_box};
 use rusqlite::Connection;
-use crate::app::{App, Group, Message, DEFAULT_AVATAR};
+use crate::app::{App, Group, Message, UserInfo, DEFAULT_AVATAR};
 use crate::db;
 
 fn headerbar(group: Group) -> Row<'static, Message> {
@@ -20,16 +20,20 @@ fn headerbar(group: Group) -> Row<'static, Message> {
         .width(Length::Fill)
 }
 
-fn content(group: Group) -> Column<'static, Message> {
-    let content = Column::new()
-        .push(Text::new(format!("Курс: {}", group.course.clone().unwrap_or_default())).size(22))
-        .push(Text::new(format!("Преподаватель: {}", group.teacher.clone().unwrap_or_default())).size(22))
-        .push(Text::new(format!("Количество студентов: {}", group.student_count.clone())).size(22));
+fn content(group: Group, app: &App) -> Column<Message> {
+    let course_name = group.course_name.unwrap_or_else(|| "Неизвестно".to_string());
+    let teacher_name = group.teacher_name.unwrap_or_else(|| "Неизвестно".to_string());
+
+    let content_col = Column::new()
+        .push(Text::new(format!("Курс: {}", course_name)).size(22))
+        .push(Text::new(format!("Преподаватель: {}", teacher_name)).size(22))
+        .push(Text::new(format!("Количество студентов: {}", group.student_count)).size(22));
 
     Column::new().push(
-        Container::new(content)
+        Container::new(content_col)
             .padding(10)
             .width(Length::Fill)
+            .style(move |_| bordered_box(&app.theme)) // Используем app.theme напрямую
     ).spacing(10)
 }
 
@@ -37,16 +41,26 @@ pub fn groups_screen(app: &App) -> Container<Message> {
     let conn = Connection::open("db_platform").unwrap();
     let groups = db::get_groups(&conn).unwrap_or_default();
     let courses = db::get_courses(&conn).unwrap_or_default();
-    let users = db::get_all_users(&conn).unwrap_or_default();
+    let users = db::get_all_users(&conn).unwrap_or_else(|e| {
+        eprintln!("ERROR (groups_screen): Не удалось загрузить пользователей для PickList: {}", e);
+        // Если критично, можно показать ошибку пользователю или вернуть пустой экран
+        // Например: return Container::new(Text::new(format!("Ошибка: {}", e))).center_x().center_y();
+        vec![] // Вернем пустой Vec, чтобы приложение не падало
+    });
+    //println!("DEBUG (groups_screen): Количество пользователей для PickList: {}", users.len());
     let students_without_group = db::get_students_without_group(&conn).unwrap_or_default();
+
+    
 
     let filter = app.group_filter_text.to_lowercase();
     let filtered_groups: Vec<Group> = groups
         .into_iter()
         .filter(|g| {
             g.name.to_lowercase().contains(&filter)
-                || g.course.clone().unwrap_or_default().to_lowercase().contains(&filter)
-                || g.teacher.clone().unwrap_or_default().to_lowercase().contains(&filter)
+                || g.course_name.clone() // Используем новое поле course_name для фильтрации
+                .map_or(false, |title| title.to_lowercase().contains(&filter))
+                || g.teacher_name.clone() // Используем новое поле teacher_name для фильтрации
+                .map_or(false, |name| name.to_lowercase().contains(&filter))
         })
         .collect();
 
@@ -72,17 +86,15 @@ pub fn groups_screen(app: &App) -> Container<Message> {
         let group_content = Column::new().push(
             Container::new(
                 Column::new()
-                    .push(Container::new(headerbar(group.clone()).padding(10)).style(move |_| bordered_box(&app.theme)))
-                    .push(Container::new(content(group)).style(move |_| bordered_box(&app.theme)))
-            )
-                .padding(10)
-                .style(move |_| bordered_box(&app.theme))
-                .width(Length::Fill)
+                    .push(Container::new(headerbar(group.clone())).padding(10).style(move |_| bordered_box(&app.theme))) // `headerbar` все еще принимает Group
+                .push(Container::new(content(group, app)).style(move |_| bordered_box(&app.theme))) // <--- Передаем `&app`
+        )
+            .padding(10)
+            .style(move |_| bordered_box(&app.theme))
+            .width(Length::Fill)
         );
-
         let group_card = Container::new(group_content)
             .width(Length::Fill);
-
         group_column = group_column.push(group_card);
     }
 
@@ -167,16 +179,16 @@ pub fn groups_screen(app: &App) -> Container<Message> {
 
             let (name_value, course_value, teacher_value, name_changed_msg, course_changed_msg, teacher_changed_msg): (
                 &String,
-                Option<String>,
-                Option<String>,
+                Option<i32>,
+                Option<i32>,
                 Box<dyn Fn(String) -> Message>,
-                Box<dyn Fn(Option<String>) -> Message>,
-                Box<dyn Fn(Option<String>) -> Message>
+                Box<dyn Fn(Option<i32>) -> Message>,
+                Box<dyn Fn(Option<i32>) -> Message>
             ) = if is_editing {
                 (
                     &app.edit_group_name,
-                    app.edit_group_course.clone(),
-                    app.edit_group_teacher.clone(),
+                    app.edit_group_course,
+                    app.edit_group_teacher,
                     Box::new(Message::EditGroupNameChanged),
                     Box::new(Message::EditGroupCourseChanged),
                     Box::new(Message::EditGroupTeacherChanged),
@@ -192,22 +204,23 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                 )
             };
 
-            let course_titles: Vec<String> = courses.iter().map(|c| c.title.clone()).collect();
-            let teacher_names: Vec<String> = users.clone();
+
 
             modal_column = modal_column
                 .push(Text::new(modal_title).size(24))
                 .push(TextInput::new("Название группы", name_value)
                     .on_input(move |s| name_changed_msg(s)))
                 .push(PickList::new(
-                    course_titles.clone(),
-                    course_value,
-                    move |course| course_changed_msg(Some(course)),
+                    courses.clone(),
+                    course_value.and_then(|id| courses.iter().find(|c| c.id == id).cloned()),
+                    move |course_selected: crate::app::Course| course_changed_msg(Some(course_selected.id)),
                 ).placeholder("Выберите курс"))
                 .push(PickList::new(
-                    teacher_names.clone(),
-                    teacher_value,
-                    move |teacher| teacher_changed_msg(Some(teacher)),
+                    users.clone(),
+                    teacher_value.and_then(|id| users.iter().find(|u| u.id == id).cloned()),
+                    move |user_selected_from_picklist: UserInfo| { // <--- UserInfo (без crate::app::)
+                        teacher_changed_msg(Some(user_selected_from_picklist.id))
+                    },
                 ).placeholder("Выберите преподавателя"))
                 .push(
                     Row::new()

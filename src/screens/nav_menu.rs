@@ -22,8 +22,17 @@ pub fn nav_menu(app: &App) -> Container<Message> {
         button("Выход").on_press(Message::Logout).width(Length::Fill),
     ]
         .spacing(10);
+
+    let content_for_teacher = column![
+        button("Профиль").on_press(Message::GoToProfile).width(Length::Fill),
+        button("Занятия").on_press(Message::GoToClasses).width(Length::Fill),
+        vertical_space(),
+        button("Настройки").on_press(Message::GoToSettings).width(Length::Fill),
+        button("Выход").on_press(Message::Logout).width(Length::Fill),
+    ]
+        .spacing(10);
     
-    match app.type_user.as_str() { 
+    match app.current_user.as_ref().unwrap().user_type.as_str() { 
         "admin" => {
             Container::new(content_for_admin)
                 .width(Length::Fill)
@@ -32,6 +41,18 @@ pub fn nav_menu(app: &App) -> Container<Message> {
         }
         "student" => {
             Container::new(content_for_student)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(10)
+        }
+        "parent" => {
+            Container::new(content_for_student)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(10)
+        }
+        "teacher" => {
+            Container::new(content_for_teacher)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .padding(10)
