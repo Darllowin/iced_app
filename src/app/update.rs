@@ -1,684 +1,17 @@
-use crate::db;
-use crate::screens::settings::theme_to_str;
-use crate::screens::{classes_screen, courses_screen, groups_screen, login_screen, nav_menu, profile_screen, register_screen, settings_screen, user_list_screen};
-use iced::widget::{text_editor, Column, Container, Row};
-use iced::{Length, Task, Theme};
-use iced_aw::date_picker::Date;
+use std::fs;
+use std::str::FromStr;
+use iced::{Task, Theme};
+use iced::widget::text_editor;
 use regex::Regex;
 use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::str::FromStr;
-use std::{fmt, fs};
+use tokio::task;
 use tokio::task::spawn_blocking;
+use crate::app::state::{Assignment, AssignmentType, Config, Course, Group, LessonWithAssignments, Level, Screen, TextInputOrEditorInput, UserInfo, CONFIG_FILE, DEFAULT_AVATAR, PATH_TO_DB};
+use crate::db;
+use crate::screens::settings::theme_to_str;
+use super::{App, Message};
 
-const CONFIG_FILE: &str = "config.json";
-pub const DEFAULT_AVATAR: &str = "default_avatar.jpg";
-
-pub struct App {
-    pub date: Date,
-    pub show_picker: bool,
-    //
-    pub current_screen: Screen,
-    pub current_user: Option<UserInfo>,
-    //
-    pub user_name: String,
-    pub user_surname: String,
-    pub user_patronymic: String,
-    pub user_email: String,
-    pub user_birthday: String,
-    pub type_user: String,
-    pub user_password: String,
-    pub user_password_repeat: String,
-    //
-    pub theme: Theme,
-    //
-    pub register_error: Option<String>,
-    pub registration_success: bool,
-    pub logged_in_user: String,
-    pub error_message: String,
-    //
-    pub user_avatar_data: Option<Vec<u8>>,
-    //
-    pub show_add_course_modal: bool,
-    pub new_course_title: String,
-    pub new_course_description: String,
-    //pub new_course_instructor: Option<String>,
-    pub new_course_level: Level,
-    // Добавлены поля для редактирования курса
-    pub editing_course: Option<Course>,
-    pub edit_course_title: String,
-    pub edit_course_description: String,
-    pub edit_course_instructor: Option<String>,
-    pub edit_course_level: Level,
-    //
-    pub show_lessons_modal: bool,
-    pub editing_lessons_course: Option<Course>,
-    pub course_lessons: Vec<LessonWithAssignments>,
-    pub new_lesson_number_text: String,
-    pub new_lesson_title: String,
-    pub lesson_error_message: Option<String>,
-    //
-    pub editing_user: Option<UserInfo>,
-    pub edit_user_error: Option<String>,
-    pub show_edit_user_modal: bool,
-    pub edit_user_name: String,
-    pub edit_user_email: String,
-    pub edit_user_birthday: String,
-    pub edit_user_type: String,
-    pub user_type_filter: Option<String>,
-    //
-    pub course_filter_text: String,
-    // Группы
-    pub show_add_group_modal: bool,
-    pub new_group_name: String,
-    pub new_group_course: Option<i32>,
-    pub new_group_teacher: Option<i32>,
-
-    pub editing_group: Option<Group>,
-    pub edit_group_name: String,
-    pub edit_group_course: Option<i32>,
-    pub edit_group_teacher: Option<i32>,
-
-    pub group_filter_text: String,
-
-    //pub selected_group_id: Option<i32>,
-    pub is_manage_students_modal_open: bool,
-    //pub group_students: Vec<UserInfo>,
-    //pub all_students: Vec<String>,
-    pub selected_student_to_add: Option<UserInfo>,
-    //pub user_group_name: Option<String>,
-    //pub logged_in_user_id: Option<i32>,
-
-    pub show_children_modal: bool,
-    pub parent_children: Vec<UserInfo>,
-    pub available_children: Vec<UserInfo>,
-    pub selected_child_to_add: Option<UserInfo>,
-    
-    //pub course_modal_view: CourseModalView,
-    pub course_error_message: Option<String>, // Ошибки, специфичные для модалки курса
-
-    pub show_assignments_modal: bool,
-    pub current_lesson_for_assignments: Option<LessonWithAssignments>,
-    pub lesson_assignments: Vec<Assignment>, // Если будете загружать задания
-    pub assignment_error_message: Option<String>,
-    // --- Поля для формы нового задания ---
-    pub new_assignment_title: String,
-    pub new_assignment_description: String,
-    pub new_assignment_type: Option<AssignmentType>, // Для текстового ввода типа
-
-    pub show_assignment_detail_modal: bool,
-    pub selected_assignment_for_detail: Option<Assignment>,
-    pub editing_assignment_title: String,
-    pub editing_assignment_description_content: text_editor::Content, // Для TextEditor (лекция, практика)
-
-    pub editing_assignment_description_text_input: String,
-    pub assignment_edit_error_message: Option<String>,
-
-    // --- Состояние экрана занятий ---
-    pub teacher_groups: Vec<Group>,
-    pub selected_group_for_classes: Option<Group>,
-
-    // Состояние модального окна заданий преподавателя
-    pub selected_proven_lesson_for_assignments: Option<ProvenLesson>,
-    pub show_teacher_assignment_modal: bool,
-    pub teacher_lesson_assignments: Vec<Assignment>, // Задания, связанные с текущим запланированным уроком
-    pub editing_teacher_assignment: Option<Assignment>, // Редактируемое задание
-    pub editing_teacher_assignment_title: String,
-    pub editing_teacher_assignment_description_text_input: String, // Для TextInput
-    pub editing_teacher_assignment_description_content: text_editor::Content, // Для TextEditor
-    pub teacher_assignment_edit_error_message: Option<String>,
-    pub available_assignments: Vec<Assignment>, // Список всех заданий для выбора
-    pub selected_assignment_to_add_to_lesson: Option<Assignment>,
-
-    pub selected_group_lessons_with_assignments: Vec<LessonWithAssignments>,
-    pub course_id_to_title: std::collections::HashMap<i32, String>,
-
-    pub new_course_teacher: Option<UserInfo>,    // Уже есть, но теперь хранит UserInfo
-    pub edit_course_teacher: Option<UserInfo>,   // Уже есть, но теперь хранит UserInfo
-    pub new_course_teacher_id: Option<i32>,     // <--- ДОБАВЬТЕ ЭТО
-    pub edit_course_teacher_id: Option<i32>,
-    pub all_users: Vec<UserInfo>,
-    pub all_courses: Vec<Course>,
-    pub past_sessions_for_group: Vec<PastSession>, // Для отображения списка прошедших занятий
-
-    pub show_group_lessons_modal: bool,
-    pub group_lessons_modal_lessons: Vec<LessonWithAssignments>, // Список уроков для отображения в модальном окне
-    pub group_lessons_modal_past_sessions: Vec<PastSession>, // Список пройденных занятий для отображения
-    pub group_lessons_modal_group_name: String,
-    pub current_manage_students_group_id: Option<i32>,
-    pub students_without_group: Vec<UserInfo>,
-
-    pub courses_for_picklist: Vec<Course>, // Для PickList курсов в модалке групп
-    pub users_for_picklist: Vec<UserInfo>,
-    pub group_error_message: Option<String>,
-
-    pub student_group_info: Option<Group>,
-    pub show_group_students_modal: bool,
-    pub selected_group_for_students_name: Option<String>, // Для отображения названия группы в модалке
-    pub selected_group_students: Vec<UserInfo>,
-    pub is_loading_group_students: bool,
-}
-
-#[derive(Debug, Clone, Eq, Hash, PartialOrd, Ord)]
-pub struct UserInfo {
-    pub id: i32,
-    pub name: String,
-    pub email: String,
-    pub birthday: String,
-    pub user_type: String, // Теперь соответствует полю "Type" в БД
-    pub avatar_data: Option<Vec<u8>>,
-    pub group_id: Option<String>,      // Это поле может быть, но оно всегда будет None из Users
-    pub child_count: Option<i32>,   // Это поле может быть, но оно всегда будет None из Users
-}
-
-
-// Для PickList:
-// Чтобы PickList мог отобразить пользователя
-impl fmt::Display for UserInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.name)
-    }
-}
-
-// Чтобы PickList мог сравнивать выбранный элемент
-// Обновите PartialEq для UserInfo, чтобы сравнивать по ID
-impl PartialEq for UserInfo {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id // <--- Сравниваем по ID
-    }
-}
-
-#[derive(Clone, Debug)]
-#[derive(PartialEq)]
-pub struct Group {
-    pub id: i32,
-    pub name: String,
-    pub course_id: Option<i32>,       // Сохраняем ID курса
-    pub course_name: Option<String>,  // Новое поле для названия курса
-    pub teacher_id: Option<i32>,      // Сохраняем ID преподавателя
-    pub teacher_name: Option<String>, // Новое поле для имени преподавателя
-    pub student_count: u8,
-}
-
-impl fmt::Display for Group {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Начинаем с имени группы
-        write!(f, "{}", self.name)?;
-
-        let mut parts = Vec::new();
-
-        // Добавляем название курса, если оно есть
-        if let Some(course_name) = &self.course_name {
-            parts.push(format!("Курс: {}", course_name));
-        }
-
-        // Добавляем название преподавателя, если оно есть
-        if let Some(teacher_name) = &self.teacher_name {
-            parts.push(format!("Преподаватель: {}", teacher_name));
-        }
-
-        // Если есть дополнительные части (курс или преподаватель), добавляем их в скобках
-        if !parts.is_empty() {
-            write!(f, " ({})", parts.join(", "))?;
-        }
-
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Lesson {
-    pub id: i32,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Assignment {
-    pub id: i32,
-    pub lesson_id: i32,
-    pub title: String,
-    pub description: String,
-    pub assignment_type: String, // В таблице колонка "type"
-}
-
-impl fmt::Display for Assignment {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Отображаем название задания и его тип
-        write!(f, "{} ({})", self.title, self.assignment_type)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum TextInputOrEditorInput {
-    TextEditor(text_editor::Action), // Действие из TextEditor
-    TextInput(String),               // Строка из TextInput
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] // Добавил Default
-pub enum AssignmentType {
-    #[default] // Задаем значение по умолчанию, если потребуется
-    Lecture,
-    Test,
-    Practice,
-    // Добавьте другие типы по необходимости
-}
-
-impl AssignmentType {
-    pub const ALL: &'static [AssignmentType] = &[
-        AssignmentType::Lecture,
-        AssignmentType::Test,
-        AssignmentType::Practice,
-    ];
-}
-
-// Реализация Display для отображения в PickList и преобразования в строку
-impl fmt::Display for AssignmentType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                AssignmentType::Lecture => "Лекция",
-                AssignmentType::Test => "Тест",
-                AssignmentType::Practice => "Практика",
-            }
-        )
-    }
-}
-
-impl PartialEq for Lesson {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id // Сравниваем по ID
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct LessonWithAssignments {
-    pub id: i32,          // ID урока из таблицы Lessons
-    pub course_id: i32,
-    pub number: i32,
-    pub title: String,
-    pub assignments: Vec<Assignment>, // Список заданий для этого урока
-}
-
-#[derive(Debug, Clone)]
-pub struct PastSession {
-    pub id: i32,
-    pub group_id: i32,
-    pub date: String,
-    pub lesson_id: i32,
-    // Можете добавить сюда информацию об уроке, если нужно:
-    pub lesson_number: Option<i32>,
-    pub lesson_title: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ProvenLesson {
-    pub id: i32,
-    pub group_id: i32,
-    pub lesson_id: i32, // Новое поле для связи с Lesson
-    pub date: String,
-    pub topic: String,
-    // Поля из связанного Lesson для отображения
-    pub lesson_number: i32,
-    pub lesson_title: String,
-    pub assignments: Vec<Assignment>,
-}
-
-
-#[derive(Debug, Clone)]
-#[derive(PartialEq)]
-pub struct Course {
-    pub id: i32,
-    pub title: String,
-    pub description: String,
-    pub instructor_id: Option<i32>,   // <--- Новое поле для ID преподавателя
-    pub instructor_name: Option<String>,
-    pub level: Option<String>,
-    pub lesson_count: i32,
-}
-
-impl fmt::Display for Course {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.title) // Что будет отображаться в PickList
-    }
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Level {
-    Beginner,
-    Intermediate,
-    Advanced,
-}
-impl Default for Level {
-    fn default() -> Self {
-        Level::Beginner
-    }
-}
-impl Level {
-    pub const ALL: &'static [Level] = &[
-        Level::Beginner,
-        Level::Intermediate,
-        Level::Advanced,
-    ];
-}
-
-impl fmt::Display for Level {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self {
-            Level::Beginner => "Начальный",
-            Level::Intermediate => "Средний",
-            Level::Advanced => "Продвинутый",
-        })
-    }
-}
-
-impl FromStr for Level {
-    type Err = ();
-
-    fn from_str(input: &str) -> Result<Level, Self::Err> {
-        match input {
-            "Начальный" => Ok(Level::Beginner),
-            "Средний" => Ok(Level::Intermediate),
-            "Продвинутый" => Ok(Level::Advanced),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-struct Config {
-    theme_name: String,
-}
-#[derive(PartialEq, Default)]
-pub enum Screen {
-    #[default]
-    Login,
-    Register,
-    Profile,
-    Settings,
-    CoursesList,
-    UserList,
-    GroupList,
-    Classes,
-}
-#[derive(Debug, Clone)]
-pub enum Message {
-    LoginPressed,
-    UserLoggedIn(Result<UserInfo, String>),
-    RegisterPressed,
-    //
-    FirstNameChanged(String),
-    LastNameChanged(String),
-    MiddleNameChanged(String),
-    EmailChanged(String),
-    PasswordChanged(String),
-    PasswordRepeatChanged(String),
-    //
-    SwitchToLogin,
-    SwitchToRegister,
-    GoToProfile,
-    GoToSettings,
-    GoToCourses,
-    GoToUserList,
-    GoToGroupList,
-    GoToClasses,
-    Logout,
-    //
-    ThemeSelected(&'static str),
-    //
-    ChooseDate,
-    SubmitDate(Date),
-    CancelDate,
-    Er(String),
-    //
-    ChooseAvatar,
-    //
-    NewCourseInstructorChanged(Option<UserInfo>),
-    NewCourseLevelChanged(Level),
-    ToggleAddCourseModal(bool),
-    NewCourseTitleChanged(String),
-    NewCourseDescriptionChanged(String),
-    SubmitNewCourse,
-    DeleteCourse(i32),
-    // Редактирование курса
-    StartEditingCourse(Course),
-    EditCourseTitleChanged(String),
-    EditCourseDescriptionChanged(String),
-    EditCourseInstructorChanged(Option<UserInfo>),
-    EditCourseLevelChanged(Level),
-    SubmitEditedCourse,
-    CancelEditingCourse,
-    // Редактирование пользователя
-    StartEditingUser(UserInfo),
-    CancelEditingUser,
-    SubmitEditedUser,
-    DeleteUser(String),
-    EditUserNameChanged(String),
-    EditUserEmailChanged(String),
-    EditUserBirthdayChanged(String),
-    EditUserTypeChanged(String),
-    UserTypeFilterChanged(Option<String>),
-    //
-    CourseFilterChanged(String),
-    // Для групп
-    ToggleAddGroupModal(bool),
-    NewGroupNameChanged(String),
-    NewGroupCourseChanged(Option<Course>),
-    NewGroupTeacherChanged(Option<UserInfo>),
-
-    EditGroupNameChanged(String),
-    EditGroupCourseChanged(Option<Course>),
-    EditGroupTeacherChanged(Option<UserInfo>),
-
-    SubmitNewGroup,
-    SubmitEditedGroup,
-    StartEditingGroup(Group),
-    CancelEditingGroup,
-    DeleteGroup(i32),
-    GroupFilterChanged(String),
-
-    OpenManageStudentsModal(i32),
-
-    ShowParentChildren(String), // email родителя
-    CloseParentChildrenModal,
-    DeleteChild { parent_email: String, child_email: String },
-    AddChildToParent,
-    SelectedChildToAddChanged(UserInfo),
-    ShowLessonsModal(Course),
-    CloseLessonsModal,
-    NewLessonNumberChanged(String),
-    NewLessonTitleChanged(String),
-    AddLesson,
-    DeleteLesson(i32),
-
-    ShowAssignmentsModal(LessonWithAssignments),
-    CloseAssignmentsModal,
-    // --- Сообщения для управления заданиями ---
-    NewAssignmentTitleChanged(String),
-    NewAssignmentDescriptionChanged(String),
-    NewAssignmentTypeSelected(AssignmentType), // Для текстового ввода типа
-    AddAssignment,
-    DeleteAssignment(i32), // передаем ID задания
-
-    ShowAssignmentDetailModal(Assignment),
-    CloseAssignmentDetailModal,
-
-    EditingAssignmentTitleChanged(String),
-    EditingAssignmentDescriptionChanged(TextInputOrEditorInput),
-    SaveEditedAssignment, // Для сохранения изменений
-    // --- Сообщения, связанные с экраном занятий ---
-    LoadTeacherGroups(i32),
-    TeacherGroupsLoaded(Result<Vec<Group>, String>), // Result для обработки ошибок
-    SelectGroupForClasses(Group),
-
-    // Для модального окна заданий преподавателя
-    CloseTeacherAssignmentModal,
-    TeacherAssignmentsLoaded(Result<Vec<Assignment>, String>),
-
-    // Для редактирования задания в модальном окне преподавателя
-    StartEditingTeacherAssignment(Assignment), // Для предварительного заполнения полей ввода
-    EditingTeacherAssignmentTitleChanged(String),
-    EditingTeacherAssignmentDescriptionChanged(TextInputOrEditorInput), // Может быть действием TextEditor или строкой TextInput
-    SaveEditedTeacherAssignment,
-    TeacherAssignmentSaved(Result<(), String>), // Result для обратной связи
-
-    // Для добавления существующих заданий к запланированному уроку
-    SelectedAssignmentToAddToLesson(Assignment),
-    AddExistingAssignmentToProvenLesson,
-    ExistingAssignmentAdded(Result<(), String>),
-    DeleteProvenLessonAssignment(i32, i32), // proven_lesson_id, assignment_id
-    ProvenLessonAssignmentDeleted(Result<(), String>),
-    
-    AssignmentsLoaded(Result<Vec<Assignment>, String>),
-
-    // Cообщение для загрузки уроков с заданиями
-    GroupLessonsWithAssignmentsLoaded(Result<Vec<LessonWithAssignments>, String>),
-    // Сообщение для загрузки проведенных занятий (если будете их отображать)
-    PastSessionsLoaded(Result<Vec<PastSession>, String>),
-    ConductLesson(i32, i32),
-    
-    CourseLessonsLoaded(Result<Vec<LessonWithAssignments>, String>),
-
-    LoadAllCourses,
-    AllCoursesLoaded(Result<Vec<Course>, String>), // Course должен быть импортирован
-
-    ConductLessonResult(Result<Vec<PastSession>, String>), // Результат добавления и загрузки PastSessions
-
-    OpenGroupLessonsModal(i32, i32), // group_id, course_id
-    GroupLessonsModalLoaded(Result<(Vec<LessonWithAssignments>, Vec<PastSession>), String>), // (доступные уроки, пройденные уроки)
-    CloseGroupLessonsModal,
-
-    LoadAllGroups, // <-- НОВОЕ СООБЩЕНИЕ: Загрузить все группы
-    StudentsInGroupLoaded(Result<Vec<UserInfo>, String>),
-    StudentsWithoutGroupLoaded(Result<Vec<UserInfo>, String>),
-
-    CoursesForPicklistLoaded(Result<Vec<Course>, String>),
-    UsersForPicklistLoaded(Result<Vec<UserInfo>, String>),
-    RemoveStudentFromGroup(i32, i32),
-    ErrorOccurred(String),
-    LoadStudentGroupInfo, // Для загрузки группы студента
-    StudentGroupInfoLoaded(Result<Option<Group>, String>),
-    ShowGroupStudents(i32), // Показать модальное окно с студентами группы (передаем group_id)
-    //LoadGroupStudents(i32), // Сообщение для асинхронной загрузки студентов
-    GroupStudentsLoaded(Result<(i32, Vec<UserInfo>), String>), // i32 - group_id, Vec<StudentInfo> - студенты
-    CloseGroupStudentsModal, // Закрыть модальное окно
-
-    AddStudentToGroup(i32, i32),
-    SelectedStudentToAddChanged(UserInfo),
-}
-impl Default for App {
-    fn default() -> Self {
-        let selected_theme = load_theme().unwrap_or(Theme::Light);
-        Self {
-            error_message: "".to_string(),
-            date: Date::today(),
-            show_picker: false,
-            current_screen: Default::default(),
-            current_user: None,
-            user_name: "".to_string(),
-            user_surname: "".to_string(),
-            user_patronymic: "".to_string(),
-            user_email: "".to_string(),
-            user_password: "".to_string(),
-            user_password_repeat: "".to_string(),
-            theme: selected_theme,
-            register_error: None,
-            registration_success: false,
-            logged_in_user: "".to_string(),
-            show_add_course_modal: false,
-            new_course_title: "".to_string(),
-            user_birthday: "".to_string(),
-            type_user: "".to_string(),
-            new_course_description: "".to_string(),
-            new_course_level: Level::Beginner,
-            editing_course: None,
-            edit_course_title: "".to_string(),
-            edit_course_description: "".to_string(),
-            edit_course_instructor: None,
-            user_avatar_data: None,
-            edit_course_level: Level::Beginner,
-            show_lessons_modal: false,
-            editing_lessons_course: None,
-            course_lessons: vec![],
-            new_lesson_number_text: "".to_string(),
-            new_lesson_title: "".to_string(),
-            lesson_error_message: None,
-            editing_user: None,
-            edit_user_error: None,
-            show_edit_user_modal: false,
-            edit_user_name: "".to_string(),
-            edit_user_email: "".to_string(),
-            edit_user_birthday: "".to_string(),
-            edit_user_type: "".to_string(),
-            user_type_filter: None,
-            course_filter_text: "".to_string(),
-            show_add_group_modal: false,
-            new_group_name: "".to_string(),
-            new_group_course: None,
-            new_group_teacher: None,
-            editing_group: None,
-            edit_group_name: "".to_string(),
-            edit_group_course: None,
-            edit_group_teacher: None,
-            group_filter_text: "".to_string(),
-            is_manage_students_modal_open: false,
-            selected_student_to_add: None,
-            show_children_modal: false,
-            parent_children: vec![],
-            available_children: vec![],
-            selected_child_to_add: None,
-            course_error_message: None,
-            show_assignments_modal: false,
-            current_lesson_for_assignments: None,
-            lesson_assignments: vec![],
-            assignment_error_message: None,
-            new_assignment_title: "".to_string(),
-            new_assignment_description: "".to_string(),
-            show_assignment_detail_modal: false,
-            selected_assignment_for_detail: None,
-            editing_assignment_title: "".to_string(),
-            editing_assignment_description_content: Default::default(),
-            new_assignment_type: None,
-            assignment_edit_error_message: None,
-            teacher_groups: vec![],
-            selected_group_for_classes: None,
-            //proven_lessons: vec![],
-            show_teacher_assignment_modal: false,
-            selected_proven_lesson_for_assignments: None,
-            teacher_lesson_assignments: vec![],
-            editing_teacher_assignment: None,
-            editing_teacher_assignment_title: "".to_string(),
-            editing_teacher_assignment_description_text_input: "".to_string(),
-            editing_teacher_assignment_description_content: Default::default(),
-            teacher_assignment_edit_error_message: None,
-            available_assignments: vec![],
-            editing_assignment_description_text_input: "".to_string(),
-            selected_assignment_to_add_to_lesson: None,
-            selected_group_lessons_with_assignments: vec![],
-            course_id_to_title: Default::default(),
-            new_course_teacher: None,
-            edit_course_teacher: None,
-            new_course_teacher_id: None,
-            edit_course_teacher_id: None,
-            all_users: vec![],
-            all_courses: vec![],
-            past_sessions_for_group: vec![],
-            show_group_lessons_modal: false,
-            group_lessons_modal_lessons: vec![],
-            group_lessons_modal_past_sessions: vec![],
-            group_lessons_modal_group_name: "".to_string(),
-            current_manage_students_group_id: None,
-            students_without_group: vec![],
-            courses_for_picklist: vec![],
-            users_for_picklist: vec![],
-            group_error_message: None,
-            student_group_info: None,
-            show_group_students_modal: false,
-            selected_group_for_students_name: None,
-            selected_group_students: vec![],
-            is_loading_group_students: false,
-        }
-    }
-}
 impl App {
     pub fn update(&mut self, message: Message) -> Task<Message>{
         let current_user_for_task_clone = self.current_user.clone();
@@ -849,7 +182,7 @@ impl App {
                     return Task::none();
                 }
 
-                let conn = Connection::open("db_platform").unwrap();
+                let conn = Connection::open(PATH_TO_DB).unwrap();
                 match db::is_email_taken(&conn, email) {
                     Ok(true) => {
                         self.register_error = Some("Пользователь с таким email уже существует.".to_string());
@@ -940,31 +273,68 @@ impl App {
                 Task::none()
             }
             Message::ChooseAvatar => {
-                if self.user_email.trim().is_empty() {
+                // Проверяем, что текущий пользователь существует (то есть email не пустой)
+                // Используем current_user.email, а не user_email, для надежности
+                let user_email_clone = if let Some(user) = &self.current_user {
+                    user.email.clone()
+                } else {
                     self.error_message = "Вы не вошли в систему. Email неизвестен.".to_string();
-                    return Task::none();
-                }
+                    return Task::none(); // Используйте Command::none()
+                };
 
-                // Эта операция также должна быть асинхронной, но для простоты пока оставим синхронно
-                // В идеале, это должен быть Task::perform(choose_avatar_and_update_db(self.user_email.clone()), Message::AvatarChosen)
-                if let Some(path_buf) = rfd::FileDialog::new().add_filter("Image", &["png", "jpg", "jpeg"]).pick_file() {
-                    match fs::read(&path_buf) {
-                        Ok(image_data) => {
-                            let conn = Connection::open("db_platform").unwrap();
-                            if let Err(err) = db::update_user_avatar(&conn, &self.user_email, &image_data) {
-                                self.error_message = format!("Ошибка сохранения аватара: {}", err);
-                            } else {
-                                self.user_avatar_data = Some(image_data);
-                                self.error_message.clear();
-                            }
+                let db_path_for_task = PATH_TO_DB;
+
+                // Запускаем асинхронную задачу для выбора аватара и обновления БД
+                Task::perform(
+                    async move {
+                        let result: Result<Vec<u8>, String> = task::spawn_blocking(move || {
+                            let Some(path_buf) = rfd::FileDialog::new().add_filter("Image", &["png", "jpg", "jpeg"]).pick_file() else {
+                                return Err("Выбор файла аватара отменен.".to_string());
+                            };
+
+                            let image_data = fs::read(&path_buf)
+                                .map_err(|err| format!("Ошибка чтения файла аватара: {}", err))?;
+
+                            let conn = Connection::open(&db_path_for_task)
+                                .map_err(|err| format!("Не удалось открыть БД для сохранения аватара: {}", err))?;
+
+                            // Обновляем аватар в БД по email
+                            db::update_user_avatar(&conn, &user_email_clone, &image_data)
+                                .map_err(|err| format!("Ошибка сохранения аватара в БД: {}", err))?;
+
+                            Ok(image_data) // Возвращаем новые данные аватара
+                        })
+                            .await
+                            .unwrap_or_else(|join_err| Err(format!("Ошибка выполнения задачи выбора аватара: {:?}", join_err)));
+
+                        result
+                    },
+                    Message::AvatarChosen // Отображаем результат выполнения этой задачи
+                )
+            },
+
+            Message::AvatarChosen(result) => {
+                match result {
+                    Ok(new_avatar_data) => {
+                        // Если аватар успешно загружен и сохранен:
+                        // ОБНОВЛЯЕМ current_user
+                        if let Some(user) = &mut self.current_user {
+                            user.avatar_data = Some(new_avatar_data);
+                            self.error_message.clear(); // Очищаем предыдущие ошибки
+                            println!("DEBUG: Аватар успешно обновлен в self.current_user.");
+                        } else {
+                            // Этот случай не должен наступать, если мы уже проверили user_email_clone
+                            self.error_message = "Не удалось обновить аватар: пользователь не найден.".to_string();
                         }
-                        Err(err) => {
-                            self.error_message = format!("Ошибка чтения файла аватара: {}", err);
-                        }
+                    },
+                    Err(e) => {
+                        // Если произошла ошибка
+                        self.error_message = e;
+                        eprintln!("ERROR: Ошибка при выборе или сохранении аватара: {}", self.error_message);
                     }
                 }
-                Task::none() // Возвращаем Task::none()
-            }
+                Task::none() // Возвращаем Command::none(), так как состояние обновлено
+            },
             Message::ToggleAddCourseModal(show) => {
                 self.show_add_course_modal = show;
                 Task::none()
@@ -979,7 +349,7 @@ impl App {
             }
             Message::LoadStudentGroupInfo => Task::perform(
                 async move { // 'move' здесь захватывает `current_user_for_task_clone`
-                    let conn = Connection::open("db_platform").map_err(|e| e.to_string())?;
+                    let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
                     // Теперь `current_user_for_task_clone` доступен, так как он был захвачен `move` замыканием
                     if let Some(user_id) = current_user_for_task_clone.as_ref().map(|u| u.id) { // <-- Используем правильную клонированную переменную
                         db::get_student_group_by_user_id(&conn, user_id)
@@ -1021,7 +391,7 @@ impl App {
                     async move {
                         spawn_blocking(move || {
                             // 1. Открываем соединение, обрабатывая Result и преобразуя ошибку в String
-                            let conn = Connection::open("db_platform")
+                            let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| e.to_string())?; // <-- ИСПРАВЛЕНО
 
                             // 2. Вызываем функцию БД, обрабатывая Result и преобразуя ошибку в String
@@ -1059,7 +429,7 @@ impl App {
                 Task::perform(
                     async move {
                         spawn_blocking(move || {
-                            let conn = Connection::open("db_platform")
+                            let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД для курсов: {}", e))?;
                             db::get_courses(&conn)
                                 .map_err(|e| format!("Ошибка загрузки курсов: {}", e))
@@ -1123,7 +493,7 @@ impl App {
                 Task::perform(
                     async move {
                         spawn_blocking(move || {
-                            let conn = Connection::open("db_platform")
+                            let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
                             // Вызов db::add_course скорректирован согласно его сигнатуре (Option<i32>, Option<&str>)
                             db::add_course(&conn, &new_course_title_clone, &new_course_description_clone, Some(new_course_teacher_id), Some(&new_course_level_string))
@@ -1142,7 +512,7 @@ impl App {
 
             Message::DeleteCourse(course_id) => {
                 // Эта операция должна быть асинхронной
-                let conn = Connection::open("db_platform").unwrap();
+                let conn = Connection::open(PATH_TO_DB).unwrap();
                 db::delete_course(&conn, course_id).unwrap();
                 Task::none() // Возвращаем Task::none()
             }
@@ -1189,7 +559,7 @@ impl App {
             Message::SubmitEditedCourse => {
                 // Эта операция должна быть асинхронной
                 if let Some(original_course) = &self.editing_course {
-                    let conn = Connection::open("db_platform").unwrap();
+                    let conn = Connection::open(PATH_TO_DB).unwrap();
 
                     // Получаем имя преподавателя для instructor_name, если оно нужно
                     // Если App.edit_course_teacher_id установлен, найдем соответствующего UserInfo
@@ -1318,7 +688,7 @@ impl App {
                         return Task::none();
                     }
 
-                    let conn = Connection::open("db_platform").unwrap();
+                    let conn = Connection::open(PATH_TO_DB).unwrap();
 
                     match db::is_email_taken_except(&conn, email, &original_user.email) {
                         Ok(true) => {
@@ -1347,11 +717,44 @@ impl App {
             }
 
             Message::DeleteUser(email) => {
-                // Эта операция должна быть асинхронной
-                let conn = Connection::open("db_platform").unwrap();
-                let _ = db::delete_user(&conn, &email);
-                Task::none() // Возвращаем Task::none()
-            }
+                println!("DEBUG: Попытка удалить пользователя с email: {}", email);
+                // Клонируем путь к БД для использования в асинхронной задаче
+                let db_path_for_task = PATH_TO_DB;
+                let user_email_for_task = email.clone(); // Клонируем email для использования в замыкании
+
+                Task::perform(
+                    async move {
+                        task::spawn_blocking(move || {
+                            let conn = Connection::open(&db_path_for_task)
+                                .map_err(|e| format!("Не удалось открыть БД для удаления: {}", e))?;
+                            db::delete_user(&conn, &user_email_for_task)
+                                .map_err(|e| format!("Ошибка удаления пользователя {}: {}", user_email_for_task, e))?;
+                            Ok(user_email_for_task) // Возвращаем email успешно удаленного пользователя
+                        })
+                            .await
+                            .unwrap_or_else(|join_err| Err(format!("Ошибка выполнения задачи удаления пользователя: {:?}", join_err)))
+                    },
+                    Message::UserDeleted // Передаем результат этой асинхронной задачи в Message::UserDeleted
+                )
+                    .into() // Преобразуем Task в Command
+            },
+
+            Message::UserDeleted(result) => {
+                match result {
+                    Ok(email) => {
+                        println!("DEBUG: Пользователь {} успешно удален. Обновляем список.", email);
+                        Task::perform(
+                            async { Message::GoToUserList }, // Асинхронный блок, который просто возвращает нужное сообщение
+                            |msg| msg // Замыкание-маппер: просто возвращает сообщение как есть
+                        )
+                    },
+                    Err(e) => {
+                        self.error_message = e.clone(); // Сохраняем сообщение об ошибке для отображения
+                        eprintln!("ERROR: Не удалось удалить пользователя: {}", e);
+                        Task::none() // Ничего не делаем, ошибка отображена
+                    }
+                }
+            },
             Message::CourseFilterChanged(text) => {
                 self.course_filter_text = text;
                 Task::none()
@@ -1391,7 +794,7 @@ impl App {
                     let task_courses = Task::perform(
                         async {
                             spawn_blocking(move || {
-                                let conn = Connection::open("db_platform")
+                                let conn = Connection::open(PATH_TO_DB)
                                     .map_err(|e| format!("Не удалось открыть БД для курсов: {}", e))?;
                                 db::get_courses(&conn) // У вас должна быть db::get_courses
                                     .map_err(|e| format!("Ошибка загрузки курсов: {}", e))
@@ -1405,7 +808,7 @@ impl App {
                     let task_users = Task::perform(
                         async {
                             spawn_blocking(move || {
-                                let conn = Connection::open("db_platform")
+                                let conn = Connection::open(PATH_TO_DB)
                                     .map_err(|e| format!("Не удалось открыть БД для пользователей: {}", e))?;
                                 db::get_all_users(&conn) // У вас должна быть db::get_all_users
                                     .map_err(|e| format!("Ошибка загрузки пользователей: {}", e))
@@ -1466,11 +869,11 @@ impl App {
                 // Вызываем загрузку списков для PickList
                 Task::batch(vec![
                     Task::perform(
-                        async { db::get_courses(&Connection::open("db_platform").unwrap()).map_err(|e| e.to_string()) },
+                        async { db::get_courses(&Connection::open(PATH_TO_DB).unwrap()).map_err(|e| e.to_string()) },
                         |r| Message::CoursesForPicklistLoaded(r)
                     ),
                     Task::perform(
-                        async { db::get_all_users(&Connection::open("db_platform").unwrap()).map_err(|e| e.to_string()) },
+                        async { db::get_all_users(&Connection::open(PATH_TO_DB).unwrap()).map_err(|e| e.to_string()) },
                         |r| Message::UsersForPicklistLoaded(r)
                     )
                 ])
@@ -1522,7 +925,7 @@ impl App {
                 Task::perform(
                     async move {
                         spawn_blocking(move || {
-                            let conn = Connection::open("db_platform")
+                            let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
                             db::update_group(&conn, group_id, &group_name_clone, group_course_id, group_teacher_id)
                                 .map_err(|e| format!("Ошибка обновления группы: {}", e))?;
@@ -1571,7 +974,7 @@ impl App {
                 Task::perform(
                     async move {
                         spawn_blocking(move || {
-                            let conn = Connection::open("db_platform")
+                            let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
                             // Вызов функции БД теперь корректен с i32
                             db::insert_group(&conn, &group_name_clone, group_course_id, group_teacher_id)
@@ -1605,7 +1008,7 @@ impl App {
             }
             Message::DeleteGroup(id) => {
                 // Эта операция должна быть асинхронной
-                let conn = Connection::open("db_platform").unwrap();
+                let conn = Connection::open(PATH_TO_DB).unwrap();
                 if let Err(err) = db::delete_group(&conn, id) {
                     eprintln!("Ошибка удаления группы: {:?}", err);
                 }
@@ -1637,7 +1040,7 @@ impl App {
                 let task_students_in_group = Task::perform(
                     async move {
                         spawn_blocking(move || {
-                            let conn = Connection::open("db_platform")
+                            let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД для студентов группы: {}", e))?;
                             // Вызываем функцию для загрузки студентов конкретной группы
                             db::get_students_in_group(&conn, group_id_for_task)
@@ -1653,7 +1056,7 @@ impl App {
                 let task_students_without_group = Task::perform(
                     async {
                         spawn_blocking(move || {
-                            let conn = Connection::open("db_platform")
+                            let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД для студентов без группы: {}", e))?;
                             // Вызываем функцию для загрузки студентов без группы
                             db::get_students_without_group(&conn)
@@ -1721,7 +1124,7 @@ impl App {
                 Task::perform(
                     async move {
                         spawn_blocking(move || {
-                            let conn = Connection::open("db_platform") // Используем клонированный путь к БД
+                            let conn = Connection::open(PATH_TO_DB) // Используем клонированный путь к БД
                                 .map_err(|e| format!("Не удалось открыть БД для добавления студента: {}", e))?;
                             db::add_student_to_group(&conn, student_id, group_id) // Используем переданные ID
                                 .map_err(|e| format!("Ошибка добавления студента в группу: {}", e))
@@ -1761,7 +1164,7 @@ impl App {
                 Task::perform(
                     async move { // 'move' здесь гарантирует, что student_id и group_id_for_async_task перемещаются в этот async блок
                         spawn_blocking(move || { // 'move' здесь гарантирует, что student_id и group_id_for_async_task перемещаются в этот blocking блок
-                            let conn = Connection::open("db_platform")
+                            let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД для удаления студента: {}", e))?;
                             db::remove_student_from_group(&conn, student_id, group_id_for_async_task) // Используем переданные значения
                                 .map_err(|e| format!("Ошибка удаления студента из группы: {}", e))
@@ -1788,7 +1191,7 @@ impl App {
             }
             Message::ShowParentChildren(parent_email) => {
                 // Эта операция должна быть асинхронной
-                let conn = Connection::open("db_platform").unwrap();
+                let conn = Connection::open(PATH_TO_DB).unwrap();
 
                 match db::get_children_for_parent(&conn, &parent_email) {
                     Ok(children) => self.parent_children = children,
@@ -1819,7 +1222,7 @@ impl App {
             }
             Message::DeleteChild { parent_email, child_email } => {
                 // Эта операция должна быть асинхронной
-                let conn = Connection::open("db_platform").unwrap();
+                let conn = Connection::open(PATH_TO_DB).unwrap();
                 if let Err(e) = db::delete_child_for_parent(&conn, &parent_email, &child_email) {
                     println!("Ошибка при удалении ребенка: {:?}", e);
                 }
@@ -1843,7 +1246,7 @@ impl App {
 
                 if let Some(child) = self.selected_child_to_add.clone() {
                     println!("Attempting to add child with email: {} to parent with email: {}", child.email, parent_email);
-                    let conn = Connection::open("db_platform").unwrap();
+                    let conn = Connection::open(PATH_TO_DB).unwrap();
 
                     if let Err(e) = db::add_child_to_parent(&conn, &parent_email, &child.email) {
                         println!("Ошибка при добавлении ребёнка: {}", e);
@@ -1871,7 +1274,7 @@ impl App {
                 Task::perform(
                     async move {
                         let blocking_result = spawn_blocking(move || {
-                            let conn = Connection::open("db_platform")
+                            let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД для загрузки уроков: {}", e))?;
 
                             // 1. Получаем все базовые уроки для этого курса
@@ -1929,7 +1332,7 @@ impl App {
                     }
 
                     // Эта операция должна быть асинхронной
-                    let conn = Connection::open("db_platform").unwrap();
+                    let conn = Connection::open(PATH_TO_DB).unwrap();
                     match db::add_lesson(&conn, course_id, Some(lesson_number.unwrap_or(0)), lesson_title) {
                         Ok(_) => {
                             println!("Занятие успешно добавлено.");
@@ -2094,7 +1497,7 @@ impl App {
                     Task::perform(
                         async move {
                             let blocking_result = spawn_blocking(move || {
-                                let conn = Connection::open("db_platform")
+                                let conn = Connection::open(PATH_TO_DB)
                                     .map_err(|e| format!("Не удалось открыть БД для уроков/заданий: {}", e))?;
 
                                 // --- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
@@ -2120,7 +1523,7 @@ impl App {
                     Task::perform(
                         async move {
                             let blocking_result = spawn_blocking(move || {
-                                let conn = Connection::open("db_platform")
+                                let conn = Connection::open(PATH_TO_DB)
                                     .map_err(|e| format!("Не удалось открыть БД для PastSessions: {}", e))?;
                                 db::get_past_sessions_for_group(&conn, group_id_clone)
                                     .map_err(|e| format!("Ошибка загрузки проведенных занятий: {}", e))
@@ -2144,7 +1547,7 @@ impl App {
                     async move {
                         // 1. Попытка добавить PastSession
                         let add_result = spawn_blocking(move || {
-                            let conn = Connection::open("db_platform")
+                            let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД для добавления PastSession: {}", e))?;
                             db::add_past_session(&conn, group_id_clone, lesson_id_clone)
                                 .map_err(|e| format!("Ошибка добавления записи о проведенном занятии: {}", e))
@@ -2157,7 +1560,7 @@ impl App {
                             Ok(_) => {
                                 // 2. Если добавление успешно, пытаемся перезагрузить PastSessions
                                 spawn_blocking(move || {
-                                    let conn = Connection::open("db_platform")
+                                    let conn = Connection::open(PATH_TO_DB)
                                         .map_err(|e| format!("Не удалось открыть БД для перезагрузки PastSessions: {}", e))?;
                                     db::get_past_sessions_for_group(&conn, group_id_clone)
                                         .map_err(|e| format!("Ошибка перезагрузки PastSessions: {}", e))
@@ -2278,7 +1681,7 @@ impl App {
                 // Проверяем, какой курс сейчас открыт
                 if let Some(course) = &self.editing_lessons_course {
                     let course_id = course.id;
-                    let conn = Connection::open("db_platform").unwrap();
+                    let conn = Connection::open(PATH_TO_DB).unwrap();
                     // Удаляем занятие из БД
                     match db::delete_lesson(&conn, lesson_id) {
                         Ok(_) => {
@@ -2311,7 +1714,7 @@ impl App {
                 }
             }
             Message::ShowAssignmentsModal(lesson_with_assignments) => {
-                let conn = Connection::open("db_platform").unwrap();
+                let conn = Connection::open(PATH_TO_DB).unwrap();
                 self.current_lesson_for_assignments = Some(lesson_with_assignments.clone());
 
                 match db::get_assignments_for_lesson(&conn, lesson_with_assignments.id) {
@@ -2389,7 +1792,7 @@ impl App {
                 Task::perform(
                     async move {
                         spawn_blocking(move || {
-                            let conn = Connection::open("db_platform")
+                            let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
                             db::add_assignment(&conn, lesson_id, &new_assignment_title_clone, &new_assignment_description_clone, &assignment_type_str)
                                 .map_err(|e| format!("Ошибка добавления задания: {}", e))?;
@@ -2410,7 +1813,7 @@ impl App {
                 )
             }
             Message::DeleteAssignment(assignment_id) => {
-                let conn = Connection::open("db_platform").unwrap();
+                let conn = Connection::open(PATH_TO_DB).unwrap();
                 match db::delete_assignment(&conn, assignment_id) {
                     Ok(_) => {
                         if let Some(current_lesson) = &self.current_lesson_for_assignments {
@@ -2481,7 +1884,7 @@ impl App {
                 Task::none()
             }
             Message::SaveEditedAssignment => {
-                let conn = Connection::open("db_platform").unwrap();
+                let conn = Connection::open(PATH_TO_DB).unwrap();
                 if let Some(selected_assignment) = &self.selected_assignment_for_detail {
                     if self.editing_assignment_title.is_empty() {
                         self.assignment_edit_error_message = Some("Название задания не может быть пустым.".to_string());
@@ -2518,7 +1921,7 @@ impl App {
                                         async move { // <-- Асинхронный блок - это Future, передаваемый в Task::perform
                                             // Этот фьючер spawn_blocking сам по себе возвращает Result<Result<Vec<Assignment>, String>, JoinError>
                                             let blocking_result = spawn_blocking(move || {
-                                                let conn_task = Connection::open("db_platform")
+                                                let conn_task = Connection::open(PATH_TO_DB)
                                                     .map_err(|e| format!("Не удалось открыть БД для загрузки заданий: {}", e))?;
                                                 db::get_assignments_for_lesson(&conn_task, lesson_id_clone)
                                                     .map_err(|e| format!("Ошибка загрузки заданий: {}", e))
@@ -2569,7 +1972,7 @@ impl App {
                     async move {
                         // Вызываем `spawn_blocking` напрямую из `task`
                         spawn_blocking(move || { // <-- Меняем на `task::spawn_blocking`
-                            let conn = Connection::open("db_platform")
+                            let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
                             db::get_teacher_groups_with_details(&conn, teacher_id_to_load)
                                 .map_err(|e| format!("Ошибка загрузки групп из БД: {}", e))
@@ -2585,7 +1988,7 @@ impl App {
                 Task::perform(
                     async { // `async` без `move`, так как не захватывает внешние переменные
                         spawn_blocking(move || {
-                            let conn = Connection::open("db_platform")
+                            let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД для загрузки ВСЕХ групп: {}", e))?;
                             db::get_all_groups(&conn) // <-- Вызываем новую функцию
                                 .map_err(|e| format!("Ошибка загрузки ВСЕХ групп из БД: {}", e))
@@ -2626,7 +2029,7 @@ impl App {
                 Task::perform(
                     async move {
                         let result = spawn_blocking(move || {
-                            let conn = Connection::open("db_platform")
+                            let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД для загрузки занятий группы: {}", e))?;
 
                             // Загружаем уроки, которые ЕЩЕ НЕ ПРОВЕДЕНЫ для этой группы
@@ -2674,42 +2077,8 @@ impl App {
             }
             Message::ErrorOccurred(_) => {Task::none()}
         }
+        
     }
-
-
-    pub fn view(&self) -> Row<Message> {
-        Row::new()
-            .spacing(20)
-            .push(
-                // Левое меню (sidebar)
-                if self.current_screen != Screen::Login && self.current_screen != Screen::Register {
-                    Container::new(nav_menu(self))
-                        .width(Length::Fixed(200.0)) // Фиксированная ширина меню
-                        .height(Length::Fill)
-                        .padding(10)
-                } else {
-                    Container::new(Column::new()) // Пустой контейнер, если экран входа
-                        .width(Length::Fixed(0.0))
-                        .height(Length::Fill)
-                }
-            )
-            .push(
-                // Основной контент
-                match &self.current_screen {
-                    Screen::Login => login_screen(self),
-                    Screen::Register => register_screen(self),
-                    Screen::Profile => profile_screen(self),
-                    Screen::Settings => settings_screen(self),
-                    Screen::CoursesList => courses_screen(self),
-                    Screen::UserList => user_list_screen(self),
-                    Screen::GroupList => groups_screen(self),
-                    Screen::Classes => classes_screen(self),
-                }
-                    .width(Length::Fill),
-            )
-            .into()
-    }
-
     fn clear_fields(&mut self) {
         self.user_name.clear();
         self.user_surname.clear();
@@ -2748,13 +2117,14 @@ pub fn load_theme() -> Option<Theme> {
 fn hash_password(password: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(password);
+    hasher.update(password);
     format!("{:x}", hasher.finalize())
 }
 
 async fn load_teacher_groups(teacher_email: String) -> Result<Vec<Group>, String> {
-    let conn = Connection::open("db_platform")
+    let conn = Connection::open(PATH_TO_DB)
         .map_err(|e| format!("Failed to open database connection: {}", e))?;
-    
+
     let teacher_id = db::get_user_id_by_email(&conn, &teacher_email)
         .ok_or_else(|| format!("Teacher with email '{}' not found.", teacher_email))?;
 
@@ -2762,20 +2132,20 @@ async fn load_teacher_groups(teacher_email: String) -> Result<Vec<Group>, String
         .map_err(|e| format!("Failed to load groups for teacher {}: {}", teacher_id, e))
 }
 async fn load_teacher_assignments_for_proven_lesson(proven_lesson_id: i32) -> Result<Vec<Assignment>, String> {
-    let conn = Connection::open("db_platform").map_err(|e| e.to_string())?;
+    let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
     db::get_assignments_for_proven_lesson(&conn, proven_lesson_id).map_err(|e| e.to_string())
 }
 
 async fn update_assignment(assignment: Assignment) -> Result<(), String> {
-    let conn = Connection::open("db_platform").map_err(|e| e.to_string())?;
+    let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
     db::update_assignment(&conn, &assignment).map_err(|e| e.to_string())
 }
 async fn add_existing_assignment_to_proven_lesson(proven_lesson_id: i32, assignment_id: i32) -> Result<(), String> {
-    let conn = Connection::open("db_platform").map_err(|e| e.to_string())?;
+    let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
     db::add_assignment_to_proven_lesson(&conn, proven_lesson_id, assignment_id).map_err(|e| e.to_string())
 }
 
 async fn delete_proven_lesson_assignment(proven_lesson_id: i32, assignment_id: i32) -> Result<(), String> {
-    let conn = Connection::open("db_platform").map_err(|e| e.to_string())?;
+    let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
     db::delete_assignment_from_proven_lesson(&conn, proven_lesson_id, assignment_id).map_err(|e| e.to_string())
 }

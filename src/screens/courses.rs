@@ -6,7 +6,9 @@ use iced::{
 use iced::widget::container::{background, bordered_box};
 use iced::widget::{button, horizontal_space, row, text, PickList, Rule, TextEditor};
 use rusqlite::Connection;
-use crate::app::{App, Course, Level, Message, AssignmentType, TextInputOrEditorInput, UserInfo}; // Импортируем Lesson
+use crate::app::{App, Message};
+use crate::app::state::{AssignmentType, Course, Level, TextInputOrEditorInput, UserInfo, PATH_TO_DB};
+// Импортируем Lesson
 use crate::db;
 
 // <-- Обновляем headrbar, чтобы кнопка "Занятия" отправляла правильное сообщение
@@ -44,7 +46,7 @@ fn content(course: Course, app: &App) -> Column<Message> {
 
 pub fn courses_screen(app: &App) -> Container<Message> {
     // Соединение с БД для загрузки курсов. Операции изменения данных должны идти через App::update
-    let conn = Connection::open("db_platform").unwrap(); // Для чтения списка курсов
+    let conn = Connection::open(PATH_TO_DB).unwrap(); // Для чтения списка курсов
     let courses = db::get_courses(&conn).unwrap_or_else(|e| {
         println!("!!! Ошибка при загрузке курсов из БД: {:?}", e);
         vec![]

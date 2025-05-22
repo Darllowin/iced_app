@@ -3,7 +3,8 @@
 use iced::{Color, Alignment, Length, Theme};
 use iced::widget::{Column, Container, Row, Text, Button, PickList, Scrollable, TextInput, Rule, TextEditor, mouse_area, horizontal_space, text, Stack};
 use iced::widget::container::{background, bordered_box};
-use crate::app::{App, Message, TextInputOrEditorInput};
+use crate::app::{App, Message};
+use crate::app::state::TextInputOrEditorInput;
 
 pub fn classes_screen(app: &App) -> Container<Message> {
     let mut main_column = Column::new()

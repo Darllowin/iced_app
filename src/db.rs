@@ -1,7 +1,11 @@
 use std::collections::HashMap;
-use rusqlite::{params, Connection, OptionalExtension, Result};
+use std::io::Cursor;
+use image::imageops::FilterType;
+use image::ImageReader;
+use rusqlite::{params, Connection, OptionalExtension, Result, Error, ffi};
+use serde::de::StdError;
 use tokio::task;
-use crate::app::{Assignment, Course, Group, LessonWithAssignments, PastSession, UserInfo};
+use crate::app::state::{Assignment, Course, Group, LessonWithAssignments, PastSession, UserInfo, PATH_TO_DB};
 
 pub enum LoginError {
     UserNotFound,
@@ -9,12 +13,13 @@ pub enum LoginError {
     DatabaseError(rusqlite::Error),
 }
 
+
 pub async fn authenticate_and_get_user_data(
     email_input: String,
     hashed_password: String,
 ) -> std::result::Result<UserInfo, String> {
     task::spawn_blocking(move || {
-        let conn = Connection::open("db_platform")
+        let conn = Connection::open(PATH_TO_DB)
             .map_err(|e| format!("Не удалось открыть базу данных: {}", e))?;
 
         let mut stmt = conn
@@ -130,10 +135,43 @@ pub fn register_user(conn: &Connection, full_name: &str, birthday: &str, email: 
 }
 
 // Обновлено для приема avatar_data как &[u8]
-pub fn update_user_avatar(conn: &Connection, email: &str, avatar_data: &[u8]) -> Result<()> {
+pub fn update_user_avatar(conn: &Connection, email: &str, raw_image_data: &[u8]) -> Result<()> {
+    // Вспомогательная функция для преобразования произвольных ошибок в rusqlite::Error::SqliteFailure
+    fn map_image_error_to_sqlite_failure(e: impl StdError + 'static) -> Error {
+        Error::SqliteFailure(
+            ffi::Error {
+                // ИСПРАВЛЕНО: Используем вариант перечисления ErrorCode::SQLITE_ERROR
+                code: ffi::ErrorCode::OperationAborted,
+                // extended_code является i32, так что 1 здесь подходит
+                extended_code: 1,
+            },
+            Some(format!("Ошибка обработки изображения: {}", e)),
+        )
+    }
+
+    // 1. Декодируем исходное изображение
+    let img = ImageReader::new(Cursor::new(raw_image_data))
+        .with_guessed_format()
+        // *** ИСПРАВЛЕНО: Используем новую вспомогательную функцию ***
+        .map_err(map_image_error_to_sqlite_failure)?
+        .decode()
+        // *** ИСПРАВЛЕНО: Используем новую вспомогательную функцию ***
+        .map_err(map_image_error_to_sqlite_failure)?;
+
+    // 2. Изменяем размер изображения до нужного (например, 220x220)
+    let target_size = 220;
+    let resized_img = img.resize(target_size, target_size, FilterType::Lanczos3);
+
+    // 3. Кодируем изображение обратно в сжатый формат (например, PNG)
+    let mut compressed_data = Vec::new();
+    resized_img.write_to(&mut Cursor::new(&mut compressed_data), image::ImageFormat::Png)
+        // *** ИСПРАВЛЕНО: Используем новую вспомогательную функцию ***
+        .map_err(map_image_error_to_sqlite_failure)?;
+
+    // 4. Сохраняем сжатые/измененные данные в БД
     conn.execute(
-        "UPDATE Users SET AvatarData = ?1 WHERE Email = ?2", // Предполагается, что столбец называется AvatarData
-        params![avatar_data, email],
+        "UPDATE Users SET AvatarData = ? WHERE Email = ?",
+        (&compressed_data, email),
     )?;
     Ok(())
 }
@@ -144,8 +182,8 @@ pub fn get_courses(conn: &Connection) -> Result<Vec<Course>> {
             C.ID,
             C.title,
             C.description,
-            C.instructor AS instructor_id,   -- <--- Получаем ID преподавателя из Course.instructor
-            U.Name AS instructor_name,       -- <--- Получаем имя преподавателя из Users.Name
+            C.instructor AS instructor_id,
+            U.Name AS instructor_name,
             C.level,
             COUNT(L.ID) AS LessonCount
         FROM Course C
@@ -238,14 +276,14 @@ pub fn update_course(conn: &Connection, course: &Course) -> Result<()> {
         params![
             course.title,
             course.description,
-            course.instructor_id, // <--- ИСПОЛЬЗУЕМ instructor_id НАПРЯМУЮ
-            course.level.as_deref(), // Level, если у вас Option<String>, то as_deref() подходит
+            course.instructor_id,
+            course.level.as_deref(),
             course.id
         ],
     )?;
     Ok(())
 }
-pub fn get_all_groups(conn: &Connection) -> Result<Vec<Group>> { // <-- НОВАЯ ФУНКЦИЯ
+pub fn get_all_groups(conn: &Connection) -> Result<Vec<Group>> {
     println!("DEBUG DB: Попытка загрузить ВСЕ группы.");
     let mut stmt = conn.prepare("
         SELECT

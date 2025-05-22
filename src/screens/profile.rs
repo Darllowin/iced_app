@@ -2,7 +2,8 @@ use iced::{widget::{column, text, button, Container}, Alignment, Color, ContentF
 use iced::widget::{image, mouse_area, row, Column, Row, Rule, Scrollable, Stack, Text};
 use iced::widget::container::{background, bordered_box};
 use iced::widget::image::Handle;
-use crate::app::{App, Message, DEFAULT_AVATAR};
+use crate::app::{App, Message};
+use crate::app::state::DEFAULT_AVATAR;
 
 pub fn profile_screen(app: &App) -> Container<Message> {
 

@@ -2,7 +2,8 @@ use iced::{widget::{Button, Column, Container, Row, Stack, Text, TextInput, mous
 use iced::widget::{button, horizontal_space, image, row, text, PickList, Rule};
 use iced::widget::container::{background, bordered_box};
 use iced::widget::image::Handle;
-use crate::app::{App, Course, Group, Message, UserInfo, DEFAULT_AVATAR};
+use crate::app::{App, Message};
+use crate::app::state::{Course, Group, UserInfo, DEFAULT_AVATAR};
 
 fn headerbar(group: &Group) -> Row<'static, Message> {
     row![

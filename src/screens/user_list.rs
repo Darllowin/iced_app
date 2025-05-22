@@ -6,11 +6,12 @@ use iced::{
 use iced::advanced::image::Handle;
 use iced::widget::container::{background, bordered_box};
 use iced::widget::{horizontal_space, image, text, PickList};
-use crate::app::{App, Message, DEFAULT_AVATAR};
+use crate::app::{App, Message};
+use crate::app::state::{DEFAULT_AVATAR, PATH_TO_DB};
 use crate::db;
 
 pub fn user_list_screen(app: &App) -> Container<Message> {
-    let conn = rusqlite::Connection::open("db_platform").unwrap();
+    let conn = rusqlite::Connection::open(PATH_TO_DB).unwrap();
     let users = db::get_all_users_for_list(&conn, app.user_type_filter.as_deref()).unwrap_or_default();
 
     let mut list = Column::new().spacing(15);

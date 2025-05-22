@@ -32,7 +32,7 @@ pub fn nav_menu(app: &App) -> Container<Message> {
     ]
         .spacing(10);
     
-    match app.current_user.as_ref().unwrap().user_type.as_str() { 
+    match app.current_user.as_ref().unwrap().user_type.as_str() {
         "admin" => {
             Container::new(content_for_admin)
                 .width(Length::Fill)

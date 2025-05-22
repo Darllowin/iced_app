@@ -1,0 +1,170 @@
+use iced_aw::date_picker::Date;
+use crate::app::state::{Assignment, AssignmentType, Course, Group, LessonWithAssignments, Level, PastSession, TextInputOrEditorInput, UserInfo};
+
+#[derive(Debug, Clone)]
+pub enum Message {
+    LoginPressed,
+    UserLoggedIn(Result<UserInfo, String>),
+    RegisterPressed,
+    //
+    FirstNameChanged(String),
+    LastNameChanged(String),
+    MiddleNameChanged(String),
+    EmailChanged(String),
+    PasswordChanged(String),
+    PasswordRepeatChanged(String),
+    //
+    SwitchToLogin,
+    SwitchToRegister,
+    GoToProfile,
+    GoToSettings,
+    GoToCourses,
+    GoToUserList,
+    GoToGroupList,
+    GoToClasses,
+    Logout,
+    //
+    ThemeSelected(&'static str),
+    //
+    ChooseDate,
+    SubmitDate(Date),
+    CancelDate,
+    Er(String),
+    //
+    ChooseAvatar,
+    AvatarChosen(Result<Vec<u8>, String>),
+    //
+    NewCourseInstructorChanged(Option<UserInfo>),
+    NewCourseLevelChanged(Level),
+    ToggleAddCourseModal(bool),
+    NewCourseTitleChanged(String),
+    NewCourseDescriptionChanged(String),
+    SubmitNewCourse,
+    DeleteCourse(i32),
+    // Редактирование курса
+    StartEditingCourse(Course),
+    EditCourseTitleChanged(String),
+    EditCourseDescriptionChanged(String),
+    EditCourseInstructorChanged(Option<UserInfo>),
+    EditCourseLevelChanged(Level),
+    SubmitEditedCourse,
+    CancelEditingCourse,
+    // Редактирование пользователя
+    StartEditingUser(UserInfo),
+    CancelEditingUser,
+    SubmitEditedUser,
+    DeleteUser(String),
+    UserDeleted(Result<String, String>),
+    EditUserNameChanged(String),
+    EditUserEmailChanged(String),
+    EditUserBirthdayChanged(String),
+    EditUserTypeChanged(String),
+    UserTypeFilterChanged(Option<String>),
+    //
+    CourseFilterChanged(String),
+    // Для групп
+    ToggleAddGroupModal(bool),
+    NewGroupNameChanged(String),
+    NewGroupCourseChanged(Option<Course>),
+    NewGroupTeacherChanged(Option<UserInfo>),
+
+    EditGroupNameChanged(String),
+    EditGroupCourseChanged(Option<Course>),
+    EditGroupTeacherChanged(Option<UserInfo>),
+
+    SubmitNewGroup,
+    SubmitEditedGroup,
+    StartEditingGroup(Group),
+    CancelEditingGroup,
+    DeleteGroup(i32),
+    GroupFilterChanged(String),
+
+    OpenManageStudentsModal(i32),
+
+    ShowParentChildren(String), // email родителя
+    CloseParentChildrenModal,
+    DeleteChild { parent_email: String, child_email: String },
+    AddChildToParent,
+    SelectedChildToAddChanged(UserInfo),
+    ShowLessonsModal(Course),
+    CloseLessonsModal,
+    NewLessonNumberChanged(String),
+    NewLessonTitleChanged(String),
+    AddLesson,
+    DeleteLesson(i32),
+
+    ShowAssignmentsModal(LessonWithAssignments),
+    CloseAssignmentsModal,
+    // --- Сообщения для управления заданиями ---
+    NewAssignmentTitleChanged(String),
+    NewAssignmentDescriptionChanged(String),
+    NewAssignmentTypeSelected(AssignmentType), // Для текстового ввода типа
+    AddAssignment,
+    DeleteAssignment(i32), // передаем ID задания
+
+    ShowAssignmentDetailModal(Assignment),
+    CloseAssignmentDetailModal,
+
+    EditingAssignmentTitleChanged(String),
+    EditingAssignmentDescriptionChanged(TextInputOrEditorInput),
+    SaveEditedAssignment, // Для сохранения изменений
+    // --- Сообщения, связанные с экраном занятий ---
+    LoadTeacherGroups(i32),
+    TeacherGroupsLoaded(Result<Vec<Group>, String>), // Result для обработки ошибок
+    SelectGroupForClasses(Group),
+
+    // Для модального окна заданий преподавателя
+    CloseTeacherAssignmentModal,
+    TeacherAssignmentsLoaded(Result<Vec<Assignment>, String>),
+
+    // Для редактирования задания в модальном окне преподавателя
+    StartEditingTeacherAssignment(Assignment), // Для предварительного заполнения полей ввода
+    EditingTeacherAssignmentTitleChanged(String),
+    EditingTeacherAssignmentDescriptionChanged(TextInputOrEditorInput), // Может быть действием TextEditor или строкой TextInput
+    SaveEditedTeacherAssignment,
+    TeacherAssignmentSaved(Result<(), String>), // Result для обратной связи
+
+    // Для добавления существующих заданий к запланированному уроку
+    SelectedAssignmentToAddToLesson(Assignment),
+    AddExistingAssignmentToProvenLesson,
+    ExistingAssignmentAdded(Result<(), String>),
+    DeleteProvenLessonAssignment(i32, i32), // proven_lesson_id, assignment_id
+    ProvenLessonAssignmentDeleted(Result<(), String>),
+
+    AssignmentsLoaded(Result<Vec<Assignment>, String>),
+
+    // Cообщение для загрузки уроков с заданиями
+    GroupLessonsWithAssignmentsLoaded(Result<Vec<LessonWithAssignments>, String>),
+    // Сообщение для загрузки проведенных занятий (если будете их отображать)
+    PastSessionsLoaded(Result<Vec<PastSession>, String>),
+    ConductLesson(i32, i32),
+
+    CourseLessonsLoaded(Result<Vec<LessonWithAssignments>, String>),
+
+    LoadAllCourses,
+    AllCoursesLoaded(Result<Vec<Course>, String>), // Course должен быть импортирован
+
+    ConductLessonResult(Result<Vec<PastSession>, String>), // Результат добавления и загрузки PastSessions
+
+    OpenGroupLessonsModal(i32, i32), // group_id, course_id
+    GroupLessonsModalLoaded(Result<(Vec<LessonWithAssignments>, Vec<PastSession>), String>), // (доступные уроки, пройденные уроки)
+    CloseGroupLessonsModal,
+
+    LoadAllGroups, // <-- НОВОЕ СООБЩЕНИЕ: Загрузить все группы
+    StudentsInGroupLoaded(Result<Vec<UserInfo>, String>),
+    StudentsWithoutGroupLoaded(Result<Vec<UserInfo>, String>),
+
+    CoursesForPicklistLoaded(Result<Vec<Course>, String>),
+    UsersForPicklistLoaded(Result<Vec<UserInfo>, String>),
+    RemoveStudentFromGroup(i32, i32),
+    ErrorOccurred(String),
+    LoadStudentGroupInfo, // Для загрузки группы студента
+    StudentGroupInfoLoaded(Result<Option<Group>, String>),
+    ShowGroupStudents(i32), // Показать модальное окно с студентами группы (передаем group_id)
+    //LoadGroupStudents(i32), // Сообщение для асинхронной загрузки студентов
+    GroupStudentsLoaded(Result<(i32, Vec<UserInfo>), String>), // i32 - group_id, Vec<StudentInfo> - студенты
+    CloseGroupStudentsModal, // Закрыть модальное окно
+
+    AddStudentToGroup(i32, i32),
+    SelectedStudentToAddChanged(UserInfo),
+}
