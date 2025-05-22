@@ -64,7 +64,7 @@ pub fn profile_screen(app: &App) -> Container<Message> {
         match user_info.user_type.as_str() {
             "student" => {
                 // Если пользователь - студент
-                if let Some(group_id) = &user_info.group_id { // Предполагаем, что у студента есть group_id
+                if let Some(_group_id) = &user_info.group_id { // Предполагаем, что у студента есть _group_id
                     if let Some(student_group) = &app.student_group_info {
                         role_specific_content = role_specific_content.push(
                             Container::new(

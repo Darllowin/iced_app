@@ -1,6 +1,4 @@
-// В course.rs
-
-use iced::{Color, ContentFit}; // Добавляем ContentFit если используем изображения
+use iced::{Color, };
 use iced::{
     widget::{Button, Column, Container, Row, Stack, Text, TextInput, mouse_area, Scrollable},
     Alignment, Length
@@ -8,7 +6,7 @@ use iced::{
 use iced::widget::container::{background, bordered_box};
 use iced::widget::{button, horizontal_space, row, text, PickList, Rule, TextEditor};
 use rusqlite::Connection;
-use crate::app::{App, Course, Level, Message, Lesson, Screen, AssignmentType, TextInputOrEditorInput, UserInfo}; // Импортируем Lesson
+use crate::app::{App, Course, Level, Message, AssignmentType, TextInputOrEditorInput, UserInfo}; // Импортируем Lesson
 use crate::db;
 
 // <-- Обновляем headrbar, чтобы кнопка "Занятия" отправляла правильное сообщение

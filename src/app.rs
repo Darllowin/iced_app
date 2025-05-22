@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use std::{fmt, fs};
-use tokio::task;
 use tokio::task::spawn_blocking;
 
 const CONFIG_FILE: &str = "config.json";
@@ -53,10 +52,10 @@ pub struct App {
     pub edit_course_instructor: Option<String>,
     pub edit_course_level: Level,
     //
-    pub show_lessons_modal: bool,             
-    pub editing_lessons_course: Option<Course>, 
+    pub show_lessons_modal: bool,
+    pub editing_lessons_course: Option<Course>,
     pub course_lessons: Vec<LessonWithAssignments>,
-    pub new_lesson_number_text: String,       
+    pub new_lesson_number_text: String,
     pub new_lesson_title: String,
     pub lesson_error_message: Option<String>,
     //
@@ -95,8 +94,7 @@ pub struct App {
     pub parent_children: Vec<UserInfo>,
     pub available_children: Vec<UserInfo>,
     pub selected_child_to_add: Option<UserInfo>,
-
-    pub show_course_details_modal: bool,
+    
     //pub course_modal_view: CourseModalView,
     pub course_error_message: Option<String>, // Ошибки, специфичные для модалки курса
 
@@ -113,18 +111,15 @@ pub struct App {
     pub selected_assignment_for_detail: Option<Assignment>,
     pub editing_assignment_title: String,
     pub editing_assignment_description_content: text_editor::Content, // Для TextEditor (лекция, практика)
-    
+
     pub editing_assignment_description_text_input: String,
     pub assignment_edit_error_message: Option<String>,
 
     // --- Состояние экрана занятий ---
     pub teacher_groups: Vec<Group>,
     pub selected_group_for_classes: Option<Group>,
-    pub group_proven_lessons: Vec<ProvenLesson>,
 
     // Состояние модального окна заданий преподавателя
-    //pub proven_lessons: Vec<ProvenLesson>,
-    pub teacher_error_message: Option<String>,
     pub selected_proven_lesson_for_assignments: Option<ProvenLesson>,
     pub show_teacher_assignment_modal: bool,
     pub teacher_lesson_assignments: Vec<Assignment>, // Задания, связанные с текущим запланированным уроком
@@ -137,18 +132,13 @@ pub struct App {
     pub selected_assignment_to_add_to_lesson: Option<Assignment>,
 
     pub selected_group_lessons_with_assignments: Vec<LessonWithAssignments>,
-    pub group_past_sessions: Vec<PastSession>,
     pub course_id_to_title: std::collections::HashMap<i32, String>,
-    pub user_id_to_name: std::collections::HashMap<i32, String>,
-    pub groups: Vec<Group>,
-    pub editing_assignment_lesson: Option<LessonWithAssignments>,
 
     pub new_course_teacher: Option<UserInfo>,    // Уже есть, но теперь хранит UserInfo
     pub edit_course_teacher: Option<UserInfo>,   // Уже есть, но теперь хранит UserInfo
     pub new_course_teacher_id: Option<i32>,     // <--- ДОБАВЬТЕ ЭТО
     pub edit_course_teacher_id: Option<i32>,
     pub all_users: Vec<UserInfo>,
-    pub all_groups: Vec<Group>,
     pub all_courses: Vec<Course>,
     pub past_sessions_for_group: Vec<PastSession>, // Для отображения списка прошедших занятий
 
@@ -157,7 +147,6 @@ pub struct App {
     pub group_lessons_modal_past_sessions: Vec<PastSession>, // Список пройденных занятий для отображения
     pub group_lessons_modal_group_name: String,
     pub current_manage_students_group_id: Option<i32>,
-    pub students_in_current_group_modal: Vec<UserInfo>,
     pub students_without_group: Vec<UserInfo>,
 
     pub courses_for_picklist: Vec<Course>, // Для PickList курсов в модалке групп
@@ -168,6 +157,7 @@ pub struct App {
     pub show_group_students_modal: bool,
     pub selected_group_for_students_name: Option<String>, // Для отображения названия группы в модалке
     pub selected_group_students: Vec<UserInfo>,
+    pub is_loading_group_students: bool,
 }
 
 #[derive(Debug, Clone, Eq, Hash, PartialOrd, Ord)]
@@ -240,9 +230,6 @@ impl fmt::Display for Group {
 #[derive(Debug, Clone)]
 pub struct Lesson {
     pub id: i32,
-    pub course_id: i32,
-    pub number: i32, // Номер может быть опциональным
-    pub title: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -490,21 +477,17 @@ pub enum Message {
     GroupFilterChanged(String),
 
     OpenManageStudentsModal(i32),
-    CloseManageStudentsModal,
-    StudentToAddSelected(Option<UserInfo>),
-    AddStudent,
-    //RemoveStudent(String),
 
     ShowParentChildren(String), // email родителя
     CloseParentChildrenModal,
     DeleteChild { parent_email: String, child_email: String },
     AddChildToParent,
     SelectedChildToAddChanged(UserInfo),
-    ShowLessonsModal(Course), 
-    CloseLessonsModal,      
-    NewLessonNumberChanged(String), 
-    NewLessonTitleChanged(String),  
-    AddLesson,                
+    ShowLessonsModal(Course),
+    CloseLessonsModal,
+    NewLessonNumberChanged(String),
+    NewLessonTitleChanged(String),
+    AddLesson,
     DeleteLesson(i32),
 
     ShowAssignmentsModal(LessonWithAssignments),
@@ -515,7 +498,7 @@ pub enum Message {
     NewAssignmentTypeSelected(AssignmentType), // Для текстового ввода типа
     AddAssignment,
     DeleteAssignment(i32), // передаем ID задания
-    
+
     ShowAssignmentDetailModal(Assignment),
     CloseAssignmentDetailModal,
 
@@ -526,13 +509,9 @@ pub enum Message {
     LoadTeacherGroups(i32),
     TeacherGroupsLoaded(Result<Vec<Group>, String>), // Result для обработки ошибок
     SelectGroupForClasses(Group),
-    LoadGroupProvenLessons,
-    GroupProvenLessonsLoaded(Result<Vec<ProvenLesson>, String>),
 
     // Для модального окна заданий преподавателя
-    ShowTeacherAssignmentModal(ProvenLesson),
     CloseTeacherAssignmentModal,
-    LoadTeacherAssignmentForProvenLesson,
     TeacherAssignmentsLoaded(Result<Vec<Assignment>, String>),
 
     // Для редактирования задания в модальном окне преподавателя
@@ -543,41 +522,26 @@ pub enum Message {
     TeacherAssignmentSaved(Result<(), String>), // Result для обратной связи
 
     // Для добавления существующих заданий к запланированному уроку
-    LoadAvailableAssignments,
-    AvailableAssignmentsLoaded(Result<Vec<Assignment>, String>),
     SelectedAssignmentToAddToLesson(Assignment),
     AddExistingAssignmentToProvenLesson,
     ExistingAssignmentAdded(Result<(), String>),
     DeleteProvenLessonAssignment(i32, i32), // proven_lesson_id, assignment_id
     ProvenLessonAssignmentDeleted(Result<(), String>),
-
-    SubmitEditedTeacherAssignment,
-    CancelEditingTeacherAssignment,
-    //ProvenLessonsLoaded(Result<Vec<ProvenLesson>, String>),
-    SelectProvenLessonForAssignments(ProvenLesson),
+    
     AssignmentsLoaded(Result<Vec<Assignment>, String>),
-    GroupLessonsLoaded(Result<Vec<ProvenLesson>, String>),
 
     // Cообщение для загрузки уроков с заданиями
     GroupLessonsWithAssignmentsLoaded(Result<Vec<LessonWithAssignments>, String>),
     // Сообщение для загрузки проведенных занятий (если будете их отображать)
     PastSessionsLoaded(Result<Vec<PastSession>, String>),
     ConductLesson(i32, i32),
-
-    LoadGroups,
-    GroupsLoaded(Result<Vec<Group>, String>),
+    
     CourseLessonsLoaded(Result<Vec<LessonWithAssignments>, String>),
-
-    LoadAllUsers, // Запрос на загрузку всех пользователей
-    AllUsersLoaded(Result<Vec<UserInfo>, String>),
 
     LoadAllCourses,
     AllCoursesLoaded(Result<Vec<Course>, String>), // Course должен быть импортирован
 
-    NoOp,
-
     ConductLessonResult(Result<Vec<PastSession>, String>), // Результат добавления и загрузки PastSessions
-    ShowError(String), // Более общее сообщение для отображения ошибок
 
     OpenGroupLessonsModal(i32, i32), // group_id, course_id
     GroupLessonsModalLoaded(Result<(Vec<LessonWithAssignments>, Vec<PastSession>), String>), // (доступные уроки, пройденные уроки)
@@ -598,6 +562,8 @@ pub enum Message {
     GroupStudentsLoaded(Result<(i32, Vec<UserInfo>), String>), // i32 - group_id, Vec<StudentInfo> - студенты
     CloseGroupStudentsModal, // Закрыть модальное окно
 
+    AddStudentToGroup(i32, i32),
+    SelectedStudentToAddChanged(UserInfo),
 }
 impl Default for App {
     fn default() -> Self {
@@ -623,7 +589,6 @@ impl Default for App {
             user_birthday: "".to_string(),
             type_user: "".to_string(),
             new_course_description: "".to_string(),
-            //new_course_instructor: None,
             new_course_level: Level::Beginner,
             editing_course: None,
             edit_course_title: "".to_string(),
@@ -655,18 +620,12 @@ impl Default for App {
             edit_group_course: None,
             edit_group_teacher: None,
             group_filter_text: "".to_string(),
-            //selected_group_id: None,
             is_manage_students_modal_open: false,
-            //group_students: vec![],
-            //all_students: vec![],
             selected_student_to_add: None,
-            //user_group_name: None,
-            //logged_in_user_id: None,
             show_children_modal: false,
             parent_children: vec![],
             available_children: vec![],
             selected_child_to_add: None,
-            show_course_details_modal: false,
             course_error_message: None,
             show_assignments_modal: false,
             current_lesson_for_assignments: None,
@@ -682,7 +641,6 @@ impl Default for App {
             assignment_edit_error_message: None,
             teacher_groups: vec![],
             selected_group_for_classes: None,
-            group_proven_lessons: vec![],
             //proven_lessons: vec![],
             show_teacher_assignment_modal: false,
             selected_proven_lesson_for_assignments: None,
@@ -696,18 +654,12 @@ impl Default for App {
             editing_assignment_description_text_input: "".to_string(),
             selected_assignment_to_add_to_lesson: None,
             selected_group_lessons_with_assignments: vec![],
-            teacher_error_message: None,
-            group_past_sessions: vec![],
             course_id_to_title: Default::default(),
-            user_id_to_name: Default::default(),
-            groups: vec![],
-            editing_assignment_lesson: None,
             new_course_teacher: None,
             edit_course_teacher: None,
             new_course_teacher_id: None,
             edit_course_teacher_id: None,
             all_users: vec![],
-            all_groups: vec![],
             all_courses: vec![],
             past_sessions_for_group: vec![],
             show_group_lessons_modal: false,
@@ -715,7 +667,6 @@ impl Default for App {
             group_lessons_modal_past_sessions: vec![],
             group_lessons_modal_group_name: "".to_string(),
             current_manage_students_group_id: None,
-            students_in_current_group_modal: vec![],
             students_without_group: vec![],
             courses_for_picklist: vec![],
             users_for_picklist: vec![],
@@ -724,6 +675,7 @@ impl Default for App {
             show_group_students_modal: false,
             selected_group_for_students_name: None,
             selected_group_students: vec![],
+            is_loading_group_students: false,
         }
     }
 }
@@ -738,12 +690,12 @@ impl App {
                 }
                 let email_clone = self.user_email.clone();
                 let password_clone = self.user_password.clone();
-                
+
                 Task::perform(
                     db::authenticate_and_get_user_data(email_clone, hash_password(&password_clone)),
                     Message::UserLoggedIn
                 )
-                
+
             }
             Message::UserLoggedIn(result) => {
                 match result {
@@ -1027,10 +979,10 @@ impl App {
             }
             Message::LoadStudentGroupInfo => Task::perform(
                 async move { // 'move' здесь захватывает `current_user_for_task_clone`
-                    let conn = rusqlite::Connection::open("db_platform").map_err(|e| e.to_string())?;
+                    let conn = Connection::open("db_platform").map_err(|e| e.to_string())?;
                     // Теперь `current_user_for_task_clone` доступен, так как он был захвачен `move` замыканием
                     if let Some(user_id) = current_user_for_task_clone.as_ref().map(|u| u.id) { // <-- Используем правильную клонированную переменную
-                        crate::db::get_student_group_by_user_id(&conn, user_id)
+                        db::get_student_group_by_user_id(&conn, user_id)
                             .map_err(|e| e.to_string())
                     } else {
                         Ok(None)
@@ -1067,9 +1019,9 @@ impl App {
                 }
                 Task::perform(
                     async move {
-                        tokio::task::spawn_blocking(move || {
+                        spawn_blocking(move || {
                             // 1. Открываем соединение, обрабатывая Result и преобразуя ошибку в String
-                            let conn = rusqlite::Connection::open("db_platform")
+                            let conn = Connection::open("db_platform")
                                 .map_err(|e| e.to_string())?; // <-- ИСПРАВЛЕНО
 
                             // 2. Вызываем функцию БД, обрабатывая Result и преобразуя ошибку в String
@@ -1106,7 +1058,7 @@ impl App {
             Message::LoadAllCourses => {
                 Task::perform(
                     async move {
-                        task::spawn_blocking(move || {
+                        spawn_blocking(move || {
                             let conn = Connection::open("db_platform")
                                 .map_err(|e| format!("Не удалось открыть БД для курсов: {}", e))?;
                             db::get_courses(&conn)
@@ -1117,58 +1069,6 @@ impl App {
                     Message::AllCoursesLoaded // <-- Когда задача завершится, отправь это сообщение
                 )
             }
-            Message::LoadAllUsers => {
-                Task::perform(
-                    async move {
-                        task::spawn_blocking(move || {
-                            let conn = Connection::open("db_platform")
-                                .map_err(|e| format!("Не удалось открыть БД для пользователей: {}", e))?;
-                            db::get_all_users(&conn)
-                                .map_err(|e| format!("Ошибка загрузки пользователей: {}", e))
-                        }).await
-                            .map_err(|join_err| format!("Ошибка выполнения задачи загрузки пользователей: {}", join_err))?
-                    },
-                    Message::AllUsersLoaded // <-- Когда задача завершится, отправь это сообщение
-                )
-            }
-            Message::LoadGroups => {
-                let user_type_clone = self.current_user.as_ref().map(|u| u.user_type.clone());
-                let current_user_id = self.current_user.as_ref().map(|u| u.id).unwrap_or(0);
-
-                Task::perform(
-                    async move {
-                        tokio::task::spawn_blocking(move || {
-                            let conn = rusqlite::Connection::open("db_platform")
-                                .map_err(|e| format!("Не удалось открыть БД для загрузки групп: {}", e))?;
-
-                            let groups_result = if let Some(user_type) = user_type_clone {
-                                if user_type == "admin" {
-                                    db::get_all_groups(&conn)
-                                } else if user_type == "teacher" {
-                                    db::get_teacher_groups_with_details(&conn, current_user_id)
-                                } else {
-                                    Ok(Vec::new())
-                                }
-                            } else {
-                                Ok(Vec::new())
-                            };
-
-                            groups_result.map_err(|e| format!("Ошибка загрузки групп: {}", e))
-                        })
-                            .await
-                            .map_err(|join_err| {
-                                eprintln!("Блокирующая задача для загрузки групп завершилась ошибкой: {:?}", join_err);
-                                format!("Ошибка выполнения операции: {}", join_err)
-                            })?
-                    },
-                    |result: Result<Vec<Group>, String>| {
-                        // Теперь мы просто передаем весь 'result' в GroupsLoaded
-                        Message::GroupsLoaded(result) // <--- ИСПРАВЛЕНИЕ ЗДЕСЬ
-                    }
-                )
-            },
-
-
             // --- Обработка результатов загрузки данных ---
             Message::AllCoursesLoaded(result) => {
                 match result {
@@ -1184,33 +1084,6 @@ impl App {
                     }
                 }
                 Task::none() // Возвращаем Task::none(), так как это конечный обработчик
-            }
-            Message::AllUsersLoaded(result) => {
-                match result {
-                    Ok(users) => {
-                        self.all_users = users.clone();
-                        self.user_id_to_name = users.into_iter().map(|u| (u.id, u.name)).collect();
-                        println!("DEBUG: user_id_to_name заполнена: {:?}", self.user_id_to_name); // <--- ВАЖНО!
-                        self.error_message = "".to_string();
-                    }
-                    Err(e) => {
-                        eprintln!("Ошибка при загрузке пользователей: {}", e);
-                        self.error_message = e.to_string();
-                    }
-                }
-                Task::none()
-            }
-            Message::GroupsLoaded(result) => { // <--- ИСПРАВЛЕНИЕ ЗДЕСЬ: 'result' теперь сам является Result
-                match result {
-                    Ok(groups) => {
-                        self.teacher_groups = groups;
-                    },
-                    Err(e) => {
-                        eprintln!("ERROR: Ошибка загрузки групп: {}", e);
-                        // self.error_message = Some(e); // Опционально: отобразить ошибку пользователю
-                    }
-                }
-                Task::none()
             }
             Message::SubmitNewCourse => {
                 // Проверка на пустые поля
@@ -1249,7 +1122,7 @@ impl App {
 
                 Task::perform(
                     async move {
-                        tokio::task::spawn_blocking(move || {
+                        spawn_blocking(move || {
                             let conn = Connection::open("db_platform")
                                 .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
                             // Вызов db::add_course скорректирован согласно его сигнатуре (Option<i32>, Option<&str>)
@@ -1517,7 +1390,7 @@ impl App {
                     // Загружаем данные для PickList'ов при открытии модалки
                     let task_courses = Task::perform(
                         async {
-                            task::spawn_blocking(move || {
+                            spawn_blocking(move || {
                                 let conn = Connection::open("db_platform")
                                     .map_err(|e| format!("Не удалось открыть БД для курсов: {}", e))?;
                                 db::get_courses(&conn) // У вас должна быть db::get_courses
@@ -1531,7 +1404,7 @@ impl App {
 
                     let task_users = Task::perform(
                         async {
-                            task::spawn_blocking(move || {
+                            spawn_blocking(move || {
                                 let conn = Connection::open("db_platform")
                                     .map_err(|e| format!("Не удалось открыть БД для пользователей: {}", e))?;
                                 db::get_all_users(&conn) // У вас должна быть db::get_all_users
@@ -1648,8 +1521,8 @@ impl App {
 
                 Task::perform(
                     async move {
-                        tokio::task::spawn_blocking(move || {
-                            let conn = rusqlite::Connection::open("db_platform")
+                        spawn_blocking(move || {
+                            let conn = Connection::open("db_platform")
                                 .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
                             db::update_group(&conn, group_id, &group_name_clone, group_course_id, group_teacher_id)
                                 .map_err(|e| format!("Ошибка обновления группы: {}", e))?;
@@ -1697,8 +1570,8 @@ impl App {
 
                 Task::perform(
                     async move {
-                        tokio::task::spawn_blocking(move || {
-                            let conn = rusqlite::Connection::open("db_platform")
+                        spawn_blocking(move || {
+                            let conn = Connection::open("db_platform")
                                 .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
                             // Вызов функции БД теперь корректен с i32
                             db::insert_group(&conn, &group_name_clone, group_course_id, group_teacher_id)
@@ -1745,13 +1618,25 @@ impl App {
             Message::OpenManageStudentsModal(group_id) => {
                 println!("DEBUG: Открываем модальное окно 'Состав' для группы ID: {}", group_id);
                 self.is_manage_students_modal_open = true;
+                self.show_group_students_modal = true;
                 self.current_manage_students_group_id = Some(group_id); // Сохраняем ID текущей группы
+
+                if let Some(group) = self.teacher_groups.iter().find(|g| g.id == group_id) {
+                    self.selected_group_for_students_name = Some(group.name.clone());
+                    println!("DEBUG: Имя группы для модального окна: {}", group.name);
+                } else {
+                    self.selected_group_for_students_name = Some("Неизвестная группа".to_string());
+                    println!("DEBUG: Имя группы для модального окна: Неизвестная группа");
+                }
+
+                self.selected_group_students = Vec::new(); // Очищаем список перед новой загрузкой
+                self.is_loading_group_students = true;
 
                 // Запускаем асинхронную задачу для загрузки студентов В ТЕКУЩЕЙ ГРУППЕ
                 let group_id_for_task = group_id; // Копируем для async move
                 let task_students_in_group = Task::perform(
                     async move {
-                        task::spawn_blocking(move || {
+                        spawn_blocking(move || {
                             let conn = Connection::open("db_platform")
                                 .map_err(|e| format!("Не удалось открыть БД для студентов группы: {}", e))?;
                             // Вызываем функцию для загрузки студентов конкретной группы
@@ -1767,7 +1652,7 @@ impl App {
                 // Запускаем асинхронную задачу для загрузки студентов БЕЗ ГРУППЫ (для PickList)
                 let task_students_without_group = Task::perform(
                     async {
-                        task::spawn_blocking(move || {
+                        spawn_blocking(move || {
                             let conn = Connection::open("db_platform")
                                 .map_err(|e| format!("Не удалось открыть БД для студентов без группы: {}", e))?;
                             // Вызываем функцию для загрузки студентов без группы
@@ -1784,14 +1669,16 @@ impl App {
                 Task::batch(vec![task_students_in_group, task_students_without_group])
             }
             Message::StudentsInGroupLoaded(result) => {
+                self.is_loading_group_students = false;
                 match result {
                     Ok(students) => {
-                        self.students_in_current_group_modal = students;
-                        println!("DEBUG: Студенты в текущей группе загружены: {} шт.", self.students_in_current_group_modal.len());
+                        self.selected_group_students = students;
+                        //self.students_in_current_group_modal = students;
+                        println!("DEBUG: Студенты в текущей группе загружены: {} шт.", self.selected_group_students.len());
                     },
                     Err(e) => {
                         eprintln!("ERROR: Не удалось загрузить студентов в группе: {}", e);
-                        self.error_message = e.to_string();
+                        self.group_error_message = Some(e);
                     }
                 }
                 Task::none()
@@ -1810,70 +1697,59 @@ impl App {
                 }
                 Task::none()
             }
-            Message::CloseManageStudentsModal => {
-                println!("DEBUG: Закрываем модальное окно 'Состав'.");
-                self.is_manage_students_modal_open = false;
-                self.current_manage_students_group_id = None;
-                self.students_in_current_group_modal.clear(); // Очищаем список студентов
-                self.students_without_group.clear(); // Очищаем список для PickList
+
+            Message::AddStudentToGroup(student_id_from_msg, group_id_from_msg) => {
+                // Мы используем group_id_from_msg, переданный из UI.
+                // Поэтому проверять self.current_manage_students_group_id здесь не обязательно.
+                // Его можно использовать для других целей, но не для определения group_id для операции.
+                let group_id = group_id_from_msg; // Просто используем переданный group_id
+
+                let student_id = student_id_from_msg;
+
+                if student_id == 0 { // Проверка, что студент был выбран (если ID 0 означает "ничего не выбрано")
+                    self.group_error_message = Some("Пожалуйста, выберите студента для добавления.".to_string());
+                    return Task::none(); // Возвращаем пустую команду, ошибка отобразится
+                }
+
+                // Очищаем выбранного студента в PickList после попытки добавления
                 self.selected_student_to_add = None;
-                Task::none()
-            }
-
-            Message::StudentToAddSelected(student_opt_from_picklist) => {
-                self.selected_student_to_add = student_opt_from_picklist;
-                Task::none()
-            }
-
-            Message::AddStudent => {
-                // Получаем ID группы из текущего состояния модалки
-                let group_id = if let Some(id) = self.current_manage_students_group_id {
-                    id
-                } else {
-                    // Используем Message::ErrorOccurred
-                    return Task::done(Message::ErrorOccurred("Не выбрана группа для добавления студента.".to_string()));
-                };
-
-                // Получаем ID студента, выбранного в PickList
-                let student_id = if let Some(student) = self.selected_student_to_add.take() {
-                    student.id // .take() забирает значение из Option, оставляя None
-                } else {
-                    // Используем Message::ErrorOccurred
-                    return Task::done(Message::ErrorOccurred("Не выбран студент для добавления.".to_string()));
-                };
+                self.group_error_message = None; // Очищаем предыдущие ошибки
 
                 println!("DEBUG: Попытка добавить студента ID: {} в группу ID: {}", student_id, group_id);
-
-                // Клонируем group_id для использования в асинхронной задаче
-                let group_id_for_task = group_id;
 
                 // Запускаем асинхронную задачу для добавления студента в БД
                 Task::perform(
                     async move {
-                        task::spawn_blocking(move || {
-                            let conn = Connection::open("db_platform")
+                        spawn_blocking(move || {
+                            let conn = Connection::open("db_platform") // Используем клонированный путь к БД
                                 .map_err(|e| format!("Не удалось открыть БД для добавления студента: {}", e))?;
-                            db::add_student_to_group(&conn, student_id, group_id_for_task) // Используем group_id_for_task
+                            db::add_student_to_group(&conn, student_id, group_id) // Используем переданные ID
                                 .map_err(|e| format!("Ошибка добавления студента в группу: {}", e))
                         })
                             .await
                             .unwrap_or_else(|join_err| Err(format!("Ошибка выполнения задачи добавления студента: {:?}", join_err)))
                     },
-                    move |result| { // Добавляем 'move' к замыканию, чтобы захватить group_id_for_task
+                    move |result| { // Это замыкание, которое обрабатывает результат асинхронной операции
                         match result {
                             Ok(_) => {
                                 println!("DEBUG: Студент успешно добавлен. Перезагружаем списки.");
                                 // После успешного добавления перезагружаем оба списка студентов в модалке
-                                Message::OpenManageStudentsModal(group_id_for_task) // Перезапускаем открытие модалки
+                                Message::OpenManageStudentsModal(group_id) // Перезапускаем открытие модалки
                             },
                             Err(e) => {
                                 eprintln!("ERROR: Не удалось добавить студента: {}", e);
-                                Message::Er(e) // <-- ИСПРАВЛЕНО: используем ErrorOccurred
+                                Message::Er(e) // Теперь это правильное сообщение об ошибке
                             }
                         }
                     }
                 )
             }
+            Message::SelectedStudentToAddChanged(student) => { // <--- 'student' теперь UserInfo напрямую
+                println!("DEBUG: Выбран студент для добавления: {:?}", student.name); // Доступ к .name напрямую
+                self.selected_student_to_add = Some(student); // Оберните его в Some() перед присвоением Option<UserInfo>
+                self.group_error_message = None; // Сброс ошибки, если пользователь выбирает нового студента
+                Task::none()
+            },
             Message::RemoveStudentFromGroup(student_id, group_id) => {
                 println!("DEBUG: Попытка удалить студента ID: {} из группы ID: {}", student_id, group_id);
 
@@ -1884,7 +1760,7 @@ impl App {
 
                 Task::perform(
                     async move { // 'move' здесь гарантирует, что student_id и group_id_for_async_task перемещаются в этот async блок
-                        tokio::task::spawn_blocking(move || { // 'move' здесь гарантирует, что student_id и group_id_for_async_task перемещаются в этот blocking блок
+                        spawn_blocking(move || { // 'move' здесь гарантирует, что student_id и group_id_for_async_task перемещаются в этот blocking блок
                             let conn = Connection::open("db_platform")
                                 .map_err(|e| format!("Не удалось открыть БД для удаления студента: {}", e))?;
                             db::remove_student_from_group(&conn, student_id, group_id_for_async_task) // Используем переданные значения
@@ -1994,7 +1870,7 @@ impl App {
 
                 Task::perform(
                     async move {
-                        let blocking_result = task::spawn_blocking(move || {
+                        let blocking_result = spawn_blocking(move || {
                             let conn = Connection::open("db_platform")
                                 .map_err(|e| format!("Не удалось открыть БД для загрузки уроков: {}", e))?;
 
@@ -2112,17 +1988,6 @@ impl App {
                 }
                 Task::none()
             }
-            Message::AvailableAssignmentsLoaded(result) => {
-                match result {
-                    Ok(assignments) => {
-                        self.available_assignments = assignments;
-                    }
-                    Err(e) => {
-                        self.teacher_assignment_edit_error_message = Some(e);
-                    }
-                }
-                Task::none()
-            }
             Message::SelectedAssignmentToAddToLesson(assignment) => {
                 self.selected_assignment_to_add_to_lesson = Some(assignment);
                 Task::none()
@@ -2186,24 +2051,6 @@ impl App {
                 }
                 Task::none()
             }
-            Message::SubmitEditedTeacherAssignment => {
-                if let Some(mut assignment) = self.editing_teacher_assignment.take() {
-                    assignment.title = self.editing_teacher_assignment_title.clone();
-                    // Получаем описание в зависимости от того, какой тип ввода активен
-                    assignment.description = if assignment.assignment_type == "Lecture" || assignment.assignment_type == "Practice" {
-                        self.editing_teacher_assignment_description_content.text()
-                    } else {
-                        self.editing_teacher_assignment_description_text_input.clone()
-                    };
-
-                    return Task::perform(
-                        update_assignment(assignment),
-                        Message::TeacherAssignmentSaved,
-                    );
-                }
-                self.teacher_assignment_edit_error_message = Some("Ошибка: Нет задания для сохранения.".to_string());
-                Task::none()
-            }
             Message::TeacherAssignmentSaved(result) => {
                 match result {
                     Ok(_) => {
@@ -2220,14 +2067,6 @@ impl App {
                         self.teacher_assignment_edit_error_message = Some(e);
                     }
                 }
-                Task::none()
-            }
-            Message::CancelEditingTeacherAssignment => {
-                self.editing_teacher_assignment = None;
-                self.editing_teacher_assignment_title.clear();
-                self.editing_teacher_assignment_description_content = text_editor::Content::new();
-                self.editing_teacher_assignment_description_text_input.clear();
-                self.teacher_assignment_edit_error_message = None;
                 Task::none()
             }
             Message::GoToClasses => {
@@ -2254,7 +2093,7 @@ impl App {
                 Task::batch([
                     Task::perform(
                         async move {
-                            let blocking_result = task::spawn_blocking(move || {
+                            let blocking_result = spawn_blocking(move || {
                                 let conn = Connection::open("db_platform")
                                     .map_err(|e| format!("Не удалось открыть БД для уроков/заданий: {}", e))?;
 
@@ -2280,7 +2119,7 @@ impl App {
                     // Задача 2: Загрузить проведенные сессии для группы (эта часть, скорее всего, в порядке)
                     Task::perform(
                         async move {
-                            let blocking_result = task::spawn_blocking(move || {
+                            let blocking_result = spawn_blocking(move || {
                                 let conn = Connection::open("db_platform")
                                     .map_err(|e| format!("Не удалось открыть БД для PastSessions: {}", e))?;
                                 db::get_past_sessions_for_group(&conn, group_id_clone)
@@ -2304,7 +2143,7 @@ impl App {
                 Task::perform(
                     async move {
                         // 1. Попытка добавить PastSession
-                        let add_result = task::spawn_blocking(move || {
+                        let add_result = spawn_blocking(move || {
                             let conn = Connection::open("db_platform")
                                 .map_err(|e| format!("Не удалось открыть БД для добавления PastSession: {}", e))?;
                             db::add_past_session(&conn, group_id_clone, lesson_id_clone)
@@ -2317,7 +2156,7 @@ impl App {
                         match add_result {
                             Ok(_) => {
                                 // 2. Если добавление успешно, пытаемся перезагрузить PastSessions
-                                task::spawn_blocking(move || {
+                                spawn_blocking(move || {
                                     let conn = Connection::open("db_platform")
                                         .map_err(|e| format!("Не удалось открыть БД для перезагрузки PastSessions: {}", e))?;
                                     db::get_past_sessions_for_group(&conn, group_id_clone)
@@ -2333,10 +2172,6 @@ impl App {
                     // <--- ВОТ ГЛАВНОЕ ИЗМЕНЕНИЕ: Отправляем новое сообщение с результатом
                     Message::ConductLessonResult // Это будет callback, который преобразует Result<...> в Message
                 )
-            }
-            Message::ShowError(error_msg) => {
-                self.error_message = error_msg.to_string(); // Устанавливаем сообщение об ошибке
-                Task::none() // Не запускаем никаких новых задач
             }
             Message::ConductLessonResult(result) => {
                 println!("DEBUG: Handling ConductLessonResult: {:?}", result.is_ok());
@@ -2397,49 +2232,6 @@ impl App {
                     }
                 }
             }
-            Message::GroupLessonsLoaded(result) => {
-                match result {
-                    Ok(lessons) => {
-                        self.group_proven_lessons = lessons; // Обновляем список уроков с их заданиями
-                        self.teacher_assignment_edit_error_message = None; // Очищаем ошибку
-                    }
-                    Err(e) => {
-                        self.group_proven_lessons = Vec::new(); // Очищаем список при ошибке
-                        self.teacher_assignment_edit_error_message = Some(e); // Показываем ошибку
-                    }
-                }
-                Task::none()
-            }
-            Message::GroupProvenLessonsLoaded(result) => {
-                match result {
-                    Ok(lessons) => {
-                        self.group_proven_lessons = lessons;
-                        self.teacher_error_message = None;
-                        println!("DEBUG: Загружено {} занятий для группы.", self.group_proven_lessons.len());
-                    }
-                    Err(e) => {
-                        self.teacher_error_message = Some(e.clone());
-                        self.group_proven_lessons.clear(); // Очистить список при ошибке
-                        eprintln!("ERROR: Ошибка загрузки занятий для группы: {}", e);
-                    }
-                }
-                Task::none()
-            }
-            Message::SelectProvenLessonForAssignments(lesson) => {
-                self.selected_proven_lesson_for_assignments = Some(lesson.clone());
-                // Открываем модальное окно с заданиями
-                self.update(Message::ShowTeacherAssignmentModal(lesson)) // Вызов другого сообщения через update
-            }
-            Message::ShowTeacherAssignmentModal(proven_lesson) => {
-                self.selected_proven_lesson_for_assignments = Some(proven_lesson.clone());
-                self.show_teacher_assignment_modal = true;
-
-                let lesson_id = proven_lesson.lesson_id;
-                Task::batch(vec![
-                    Task::perform(load_teacher_assignments_for_proven_lesson(lesson_id), Message::TeacherAssignmentsLoaded),
-                    Task::perform(load_all_assignments(), Message::AvailableAssignmentsLoaded),
-                ])
-            }
             Message::CloseTeacherAssignmentModal => {
                 self.show_teacher_assignment_modal = false;
                 self.selected_proven_lesson_for_assignments = None;
@@ -2449,17 +2241,6 @@ impl App {
                 self.editing_teacher_assignment = None;
                 self.teacher_assignment_edit_error_message = None;
                 Task::none()
-            }
-            Message::LoadTeacherAssignmentForProvenLesson => {
-                if let Some(proven_lesson) = &self.selected_proven_lesson_for_assignments {
-                    let proven_lesson_id = proven_lesson.id;
-                    // Возвращаем Task::perform напрямую
-                    Task::perform(load_teacher_assignments_for_proven_lesson(proven_lesson_id), Message::TeacherAssignmentsLoaded)
-                } else {
-                    // Если proven_lesson не выбран, возвращаем пустой Task и возможно, сообщение об ошибке
-                    self.teacher_assignment_edit_error_message = Some("Не выбрано занятие для загрузки заданий.".to_string());
-                    Task::none()
-                }
             }
             Message::EditingTeacherAssignmentTitleChanged(value) => {
                 self.editing_teacher_assignment_title = value;
@@ -2492,10 +2273,6 @@ impl App {
                     self.teacher_assignment_edit_error_message = Some("Нет задания для сохранения.".to_string());
                     Task::none() // Если нет задания для редактирования
                 }
-            }
-            Message::LoadAvailableAssignments => {
-                // Возвращаем Task::perform
-                Task::perform(load_all_assignments(), Message::AvailableAssignmentsLoaded)
             }
             Message::DeleteLesson(lesson_id) => {
                 // Проверяем, какой курс сейчас открыт
@@ -2611,7 +2388,7 @@ impl App {
 
                 Task::perform(
                     async move {
-                        tokio::task::spawn_blocking(move || {
+                        spawn_blocking(move || {
                             let conn = Connection::open("db_platform")
                                 .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
                             db::add_assignment(&conn, lesson_id, &new_assignment_title_clone, &new_assignment_description_clone, &assignment_type_str)
@@ -2622,7 +2399,7 @@ impl App {
                         }).await
                             .map_err(|join_err| format!("Ошибка выполнения задачи: {:?}", join_err))?
                     },
-                    |result: Result<Vec<crate::app::Assignment>, String>| { // Ожидаем Result<Vec<Assignment>, String>
+                    |result: Result<Vec<Assignment>, String>| { // Ожидаем Result<Vec<Assignment>, String>
                         match result {
                             Ok(assignments) => {
                                 Message::AssignmentsLoaded(Ok(assignments)) // Отправляем новое сообщение с загруженными заданиями
@@ -2740,7 +2517,7 @@ impl App {
                                     return Task::perform(
                                         async move { // <-- Асинхронный блок - это Future, передаваемый в Task::perform
                                             // Этот фьючер spawn_blocking сам по себе возвращает Result<Result<Vec<Assignment>, String>, JoinError>
-                                            let blocking_result = task::spawn_blocking(move || {
+                                            let blocking_result = spawn_blocking(move || {
                                                 let conn_task = Connection::open("db_platform")
                                                     .map_err(|e| format!("Не удалось открыть БД для загрузки заданий: {}", e))?;
                                                 db::get_assignments_for_lesson(&conn_task, lesson_id_clone)
@@ -2834,14 +2611,6 @@ impl App {
                 }
                 Task::none()
             }
-            Message::LoadGroupProvenLessons => {
-                if let Some(group) = &self.selected_group_for_classes {
-                    let group_id = group.id;
-                    return Task::perform(load_group_proven_lessons(group_id), Message::GroupProvenLessonsLoaded);
-                }
-                Task::none()
-            }
-            Message::NoOp => {Task::none()}
             Message::OpenGroupLessonsModal(group_id, course_id) => {
                 self.show_group_lessons_modal = true;
                 self.group_lessons_modal_lessons.clear();
@@ -2856,7 +2625,7 @@ impl App {
 
                 Task::perform(
                     async move {
-                        let result = task::spawn_blocking(move || {
+                        let result = spawn_blocking(move || {
                             let conn = Connection::open("db_platform")
                                 .map_err(|e| format!("Не удалось открыть БД для загрузки занятий группы: {}", e))?;
 
@@ -2905,7 +2674,7 @@ impl App {
             }
             Message::ErrorOccurred(_) => {Task::none()}
         }
-}
+    }
 
 
     pub fn view(&self) -> Row<Message> {
@@ -2920,7 +2689,7 @@ impl App {
                         .padding(10)
                 } else {
                     Container::new(Column::new()) // Пустой контейнер, если экран входа
-                        .width(Length::Fixed(0.0)) 
+                        .width(Length::Fixed(0.0))
                         .height(Length::Fill)
                 }
             )
@@ -2951,27 +2720,6 @@ impl App {
         self.user_password_repeat.clear();
         self.register_error = None;
         self.registration_success = false;
-    }
-
-    // Функция для сохранения всех настроек
-    pub fn save_config(app: &App) -> std::io::Result<()> {
-        let config = Config {
-            theme_name: theme_to_str(&app.theme).to_string(),
-        };
-        let json = serde_json::to_string_pretty(&config)?;
-        fs::write(CONFIG_FILE, json)?;
-        Ok(())
-    }
-
-    // Функция для загрузки всех настроек
-    pub fn load_config() -> Config {
-        let contents = fs::read_to_string(CONFIG_FILE).ok();
-        contents.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_else(|| {
-            // Возвращаем Config со значениями по умолчанию, если файл не найден или невалиден
-            Config {
-                theme_name: theme_to_str(&Theme::Dark).to_string(), // Тема по умолчанию
-            }
-        })
     }
 }
 
@@ -3006,20 +2754,13 @@ fn hash_password(password: &str) -> String {
 async fn load_teacher_groups(teacher_email: String) -> Result<Vec<Group>, String> {
     let conn = Connection::open("db_platform")
         .map_err(|e| format!("Failed to open database connection: {}", e))?;
-
-    // Здесь мы используем ok_or_else, чтобы преобразовать Option в Result
+    
     let teacher_id = db::get_user_id_by_email(&conn, &teacher_email)
         .ok_or_else(|| format!("Teacher with email '{}' not found.", teacher_email))?;
 
     db::get_groups_for_teacher(&conn, teacher_id)
         .map_err(|e| format!("Failed to load groups for teacher {}: {}", teacher_id, e))
 }
-
-async fn load_group_proven_lessons(group_id: i32) -> Result<Vec<ProvenLesson>, String> {
-    let conn = Connection::open("db_platform").map_err(|e| e.to_string())?;
-    db::get_proven_lessons_for_group(&conn, group_id).map_err(|e| e.to_string())
-}
-
 async fn load_teacher_assignments_for_proven_lesson(proven_lesson_id: i32) -> Result<Vec<Assignment>, String> {
     let conn = Connection::open("db_platform").map_err(|e| e.to_string())?;
     db::get_assignments_for_proven_lesson(&conn, proven_lesson_id).map_err(|e| e.to_string())
@@ -3029,12 +2770,6 @@ async fn update_assignment(assignment: Assignment) -> Result<(), String> {
     let conn = Connection::open("db_platform").map_err(|e| e.to_string())?;
     db::update_assignment(&conn, &assignment).map_err(|e| e.to_string())
 }
-
-async fn load_all_assignments() -> Result<Vec<Assignment>, String> {
-    let conn = Connection::open("db_platform").map_err(|e| e.to_string())?;
-    db::get_all_assignments(&conn).map_err(|e| e.to_string())
-}
-
 async fn add_existing_assignment_to_proven_lesson(proven_lesson_id: i32, assignment_id: i32) -> Result<(), String> {
     let conn = Connection::open("db_platform").map_err(|e| e.to_string())?;
     db::add_assignment_to_proven_lesson(&conn, proven_lesson_id, assignment_id).map_err(|e| e.to_string())
@@ -3044,4 +2779,3 @@ async fn delete_proven_lesson_assignment(proven_lesson_id: i32, assignment_id: i
     let conn = Connection::open("db_platform").map_err(|e| e.to_string())?;
     db::delete_assignment_from_proven_lesson(&conn, proven_lesson_id, assignment_id).map_err(|e| e.to_string())
 }
-

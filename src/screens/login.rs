@@ -1,5 +1,5 @@
-use iced::{widget::{column, text, text_input, button, vertical_space, Container}, Length, Alignment, Center, Theme};
 use crate::app::{App, Message};
+use iced::{widget::{button, column, text, text_input, vertical_space, Container}, Center, Length};
 
 pub fn login_screen(app: &App) -> Container<Message> {
     let content = column![

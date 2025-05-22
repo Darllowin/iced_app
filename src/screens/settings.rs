@@ -1,6 +1,6 @@
-use iced::{widget::{column, text, Container, vertical_space}, Length, Center, Theme};
-use iced::widget::{checkbox, pick_list};
 use crate::app::{App, Message};
+use iced::widget::pick_list;
+use iced::{widget::{column, text, vertical_space, Container}, Center, Length, Theme};
 
 pub fn settings_screen(_app: &App) -> Container<Message> {
     let current_name = theme_to_str(&_app.theme);

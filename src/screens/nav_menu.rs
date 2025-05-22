@@ -1,6 +1,6 @@
-use iced::{widget::{button, row, column, Row}, Length};
-use iced::widget::{vertical_space, Column, Container};
-use iced::widget::container::bordered_box;
+use iced::{widget::{button, column}, Length};
+use iced::widget::{vertical_space, Container};
+
 use crate::app::{Message, App};
 
 pub fn nav_menu(app: &App) -> Container<Message> {

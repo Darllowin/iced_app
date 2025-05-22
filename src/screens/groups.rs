@@ -99,10 +99,17 @@ pub fn groups_screen(app: &App) -> Container<Message> {
     // Модальное окно управления студентами
     if app.show_group_students_modal {
         if let Some(group_name) = &app.selected_group_for_students_name {
+            // current_group_id нужен для добавления/удаления
+            let current_group_id = app.current_manage_students_group_id.unwrap_or(0);
             let modal_title_text = format!("Состав группы: {}", group_name);
 
             let mut students_list_col: Column<'_, Message, Theme> = Column::new().spacing(5);
-            if app.selected_group_students.is_empty() {
+            println!("DEBUG VIEW: app.selected_group_students.len() = {}", app.selected_group_students.len());
+            if app.is_loading_group_students { // <-- Проверяем флаг загрузки
+                students_list_col = students_list_col.push(
+                    Text::new("Загрузка студентов...").size(16).color(Color::from_rgb8(100, 100, 200)) // Добавлен цвет
+                );
+            } else if app.selected_group_students.is_empty() {
                 students_list_col = students_list_col.push(
                     Text::new("В этой группе пока нет студентов.").size(16)
                 );
@@ -133,12 +140,15 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                         .push(avatar) // Добавляем аватар
                         .push(Column::new()
                             .spacing(5) // Уменьшим spacing для компактности
-                            .push(Text::new(format!("**ФИО:** {}", student.name.clone()))) // Используем bold для "ФИО"
-                            .push(Text::new(format!("**Email:** {}", student.email.clone())))
-                            .push(Text::new(format!("**Дата рождения:** {}", student.birthday.clone())))
+                            .push(Text::new(format!("ФИО: {}", student.name.clone()))) // Используем bold для "ФИО"
+                            .push(Text::new(format!("Email: {}", student.email.clone())))
+                            .push(Text::new(format!("Дата рождения: {}", student.birthday.clone())))
+                        )
+                        .push(horizontal_space())
+                        .push(
+                            button(Text::new("Удалить"))
+                                .on_press(Message::RemoveStudentFromGroup(student.id, current_group_id))
                         );
-                    // .push(horizontal_space()) // <-- УДАЛЕНО: нет кнопки для выравнивания
-                    // .push(button("X").on_press(Message::RemoveStudentFromGroup(student.id, current_group_id))); // <-- УДАЛЕНО
 
                     students_list_col = students_list_col.push(
                         Container::new(student_row_content)
@@ -152,12 +162,35 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                 Container::new(students_list_col).padding(5)
             ).height(Length::FillPortion(1));
 
+            // Логика добавления студента
+            let add_student_row = Row::new()
+                .spacing(10)
+                .align_y(Alignment::Center)
+                .push(Text::new("Добавить студента:").size(18))
+                .push(
+                    PickList::new(
+                        app.students_without_group.clone(), // Список студентов без группы
+                        app.selected_student_to_add.clone(),
+                        Message::SelectedStudentToAddChanged, // Сообщение при выборе студента
+                    ).placeholder("Выберите студента")
+                )
+                .push(
+                    button(Text::new("Добавить"))
+                        .on_press(Message::AddStudentToGroup(
+                            app.selected_student_to_add.as_ref().map_or(0, |s| s.id), // ID выбранного студента
+                            current_group_id // ID текущей группы
+                        ))
+                        .width(Length::Shrink)
+                );
+
             let modal_content = Column::new()
                 .spacing(15)
                 .align_x(Alignment::Start)
                 .push(Text::new(modal_title_text).size(22))
                 .push(scrollable_students)
                 .push(Rule::horizontal(10))
+                .push(add_student_row) // Добавляем строку для добавления студента
+                .push(Text::new(app.group_error_message.clone().unwrap_or_default()).color(Color::from_rgb(1.0, 0.0, 0.0))) // Сообщение об ошибке
                 .push(
                     button(Text::new("Закрыть"))
                         .on_press(Message::CloseGroupStudentsModal)
@@ -223,7 +256,7 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                 Box::new(Message::NewGroupTeacherChanged),
             )
         };
-        let mut modal_column = Column::new().spacing(10).width(Length::Fill)
+        let modal_column = Column::new().spacing(10).width(Length::Fill)
             .push(Text::new(modal_title).size(24))
             .push(TextInput::new("Название группы", name_value)
                 .on_input(move |s| name_changed_msg(s)))
