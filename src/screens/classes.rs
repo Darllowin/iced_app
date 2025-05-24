@@ -1,10 +1,7 @@
-// src/classes.rs
-
-use iced::{Color, Alignment, Length, Theme};
-use iced::widget::{Column, Container, Row, Text, Button, PickList, Scrollable, TextInput, Rule, TextEditor, mouse_area, horizontal_space, text, Stack};
+use iced::{Color, Alignment, Length, Theme, Element, Renderer};
+use iced::widget::{Column, Container, Row, Text, Button, PickList, Scrollable, horizontal_space, text, Stack, Checkbox};
 use iced::widget::container::{background, bordered_box};
 use crate::app::{App, Message};
-use crate::app::state::TextInputOrEditorInput;
 
 pub fn classes_screen(app: &App) -> Container<Message> {
     let mut main_column = Column::new()
@@ -18,7 +15,6 @@ pub fn classes_screen(app: &App) -> Container<Message> {
     if app.teacher_groups.is_empty() {
         group_options_ui = group_options_ui.push(Text::new("Нет доступных групп."));
     } else {
-        // Создать PickList для групп
         let group_picklist = PickList::new(
             app.teacher_groups.clone(), // Клонируем группы для PickList
             app.selected_group_for_classes.clone(),
@@ -69,9 +65,9 @@ pub fn classes_screen(app: &App) -> Container<Message> {
                     .push(horizontal_space());
 
                 // Определяем, какая кнопка или текст будет отображаться
-                let conduct_button_or_text = 
+                let conduct_button_or_text =
                     Button::new(Text::new("Провести занятие"))
-                        .on_press(Message::ConductLesson(lesson_with_assignments.id, selected_group.id));
+                        .on_press(Message::OpenConductLessonModal(lesson_with_assignments.id, selected_group.id));
 
                 lesson_header_row = lesson_header_row.push(conduct_button_or_text);
 
@@ -141,139 +137,79 @@ pub fn classes_screen(app: &App) -> Container<Message> {
 
     let mut ui_stack = Stack::new().push(base_ui);
 
-    // --- Модальное окно заданий преподавателя ---
-    // ... (Этот блок остается без изменений, так как он относится к модальному окну, а не к основному списку)
-    if app.show_teacher_assignment_modal {
-        if let Some(proven_lesson) = &app.selected_proven_lesson_for_assignments {
-            let modal_title_text = format!("Задания для: {} ({}) - {}",
-                                           proven_lesson.lesson_title,
-                                           proven_lesson.topic,
-                                           proven_lesson.date
-            );
+    if app.show_conduct_lesson_modal {
+        // Фон модального окна
+        ui_stack = ui_stack.push(
+            Container::new(
+                Column::new()
+                    .width(Length::Fill)
+                    .height(Length::Fill)
 
-            let mut assignments_list_col: Column<'_, _, Theme> = Column::new().spacing(5);
-            if app.teacher_lesson_assignments.is_empty() {
-                assignments_list_col = assignments_list_col.push(
-                    Text::new("Для этого занятия еще нет заданий.").size(16)
-                );
-            } else {
-                for assignment in &app.teacher_lesson_assignments {
-                    let assignment_row = Row::new()
-                        .spacing(10)
-                        .align_y(Alignment::Center)
-                        .push(Text::new(format!("{} ({})", assignment.title, assignment.assignment_type))
-                            .width(Length::FillPortion(3)))
-                        .push(text(&assignment.description) // Используем text() вместо Text::new() для корректного отображения длинного текста
-                                  .width(Length::FillPortion(5))
-                                  .height(Length::Shrink) // Высота по содержимому
+            ).style(move |_| background(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.7 }))
+        );
+
+        // Содержимое модального окна
+        ui_stack = ui_stack.push(
+            Container::new(
+                Column::new()
+                    .spacing(15)
+                    .padding(20)
+                    .width(Length::Fixed(400.0))
+                    .height(Length::Shrink)
+                    .push(Text::new("Отметить посещаемость").size(24))
+                    .push(Text::new(format!("Урок: {}", app.current_lesson_to_conduct.as_ref().map_or("N/A".to_string(), |l| l.title.clone()))))
+                    .push(Text::new(format!("Группа: {}", app.current_group_for_attendance.as_ref().map_or("N/A".to_string(), |g| g.name.clone()))))
+                    .push(
+                        Scrollable::new(
+                            Container::new(
+                                Column::new()
+                                    .spacing(10)
+                                    // Создаем вектор элементов для студентов
+                                    .extend({ // <--- Обратите внимание на этот блок
+                                        let mut student_rows: Vec<Element<'_, Message, Theme, Renderer>> = Vec::new();
+
+                                        if app.students_for_attendance.is_empty() {
+                                            student_rows.push(Text::new("Нет студентов в этой группе.").into());
+                                        } else {
+                                            // Итерируемся и добавляем каждую строку студента в вектор
+                                            for student in &app.students_for_attendance {
+                                                student_rows.push(
+                                                    Row::new()
+                                                        .spacing(10)
+                                                        .align_y(Alignment::Center)
+                                                        .push(Checkbox::new(
+                                                            format!("{}", student.name),
+                                                            student.present,
+                                                        )
+                                                            .on_toggle(move |_is_checked| Message::ToggleStudentAttendance(student.id))
+                                                        )
+                                                        .into() // Преобразуем Row в Element
+                                                );
+                                            }
+                                        }
+                                        student_rows // Возвращаем вектор элементов
+                                    })
+                            )
+                                .padding(10)
                         )
-                        .push(horizontal_space())
-                        .push(
-                            Button::new(Text::new("Редактировать"))
-                                .on_press(Message::StartEditingTeacherAssignment(assignment.clone()))
-                        )
-                        .push(
-                            Button::new(Text::new("X"))
-                                .on_press(Message::DeleteProvenLessonAssignment(proven_lesson.id, assignment.id)) // Передаем proven_lesson_id и assignment_id
-                        );
-                    assignments_list_col = assignments_list_col.push(
-                        Container::new(assignment_row).padding(5).width(Length::Fill).style(move |_| bordered_box(&app.theme))
-                    );
-                }
-            }
-
-            let scrollable_assignments = Scrollable::new(
-                Container::new(assignments_list_col).padding(5)
-            ).height(Length::FillPortion(2));
-
-            // Форма редактирования задания
-            let mut editing_form = Column::new().spacing(10);
-            if app.editing_teacher_assignment.is_some() {
-                let assignment_type = app.editing_teacher_assignment.as_ref().unwrap().assignment_type.clone();
-
-                editing_form = editing_form
-                    .push(Text::new("Редактировать задание").size(18))
-                    .push(TextInput::new("Название задания", &app.editing_teacher_assignment_title)
-                        .on_input(Message::EditingTeacherAssignmentTitleChanged));
-
-                if assignment_type == "Lecture" || assignment_type == "Practice" {
-                    editing_form = editing_form
-                        .push(Text::new("Описание/Текст:"))
-                        .push(Scrollable::new(
-                            TextEditor::new(&app.editing_teacher_assignment_description_content)
-                                .placeholder("Введите описание...")
-                                .on_action(|action| Message::EditingTeacherAssignmentDescriptionChanged(TextInputOrEditorInput::TextEditor(action)))
-                        ).height(Length::Fixed(150.0))
-                        );
-                } else {
-                    editing_form = editing_form
-                        .push(Text::new("Описание/Инструкции:"))
-                        .push(TextInput::new("Введите описание...", &app.editing_teacher_assignment_description_text_input)
-                            .on_input(|s| Message::EditingTeacherAssignmentDescriptionChanged(TextInputOrEditorInput::TextInput(s))));
-                }
-
-                editing_form = editing_form.push(
-                    Button::new(Text::new("Сохранить изменения"))
-                        .on_press(Message::SaveEditedTeacherAssignment)
-                );
-            } else {
-                editing_form = editing_form.push(Text::new("Выберите задание для редактирования или добавьте новое."));
-            }
-
-            // Добавить существующее задание
-            let add_existing_assignment_form = Column::new()
-                .spacing(10)
-                .push(Text::new("Добавить существующее задание к занятию").size(18))
-                .push(
-                    PickList::new(
-                        app.available_assignments.clone(),
-                        app.selected_assignment_to_add_to_lesson.clone(),
-                        Message::SelectedAssignmentToAddToLesson,
+                            .height(Length::Fixed(200.0)) // Фиксированная высота для прокручиваемого списка студентов
                     )
-                        .placeholder("Выберите задание")
-                )
-                .push(
-                    Button::new(Text::new("Добавить выбранное задание"))
-                        .on_press(Message::AddExistingAssignmentToProvenLesson)
-                );
-
-
-            let mut assignments_modal_col = Column::new()
-                .spacing(15)
-                .align_x(Alignment::Start)
-                .push(Text::new(modal_title_text).size(22))
-                .push(scrollable_assignments)
-                .push(Rule::horizontal(10))
-                .push(editing_form)
-                .push(Rule::horizontal(10))
-                .push(add_existing_assignment_form);
-
-
-            if let Some(error_msg) = &app.teacher_assignment_edit_error_message {
-                assignments_modal_col = assignments_modal_col.push(Text::new(error_msg).size(16).color(Color::from_rgb8(255, 0, 0)));
-            }
-            assignments_modal_col = assignments_modal_col.push(
-                Button::new(Text::new("Закрыть"))
-                    .on_press(Message::CloseTeacherAssignmentModal)
-            );
-
-
-            let assignments_modal_container = Container::new(assignments_modal_col)
-                .style(move |_| bordered_box(&app.theme))
-                .padding(20)
-                .height(Length::Fixed(700.0)) // Увеличена высота для большего содержимого
-                .width(Length::Fixed(800.0));
-
-            let assignments_modal_overlay = Container::new(
-                mouse_area(Container::new(assignments_modal_container).center(Length::Fill))
-                    .on_press(Message::Er("".to_string())) // Рассмотрите более конкретное сообщение или кнопку закрытия
+                    .push(
+                        Row::new()
+                            .spacing(10)
+                            .push(
+                                Button::new(Text::new("Сохранить"))
+                                    .on_press(Message::SaveAttendance)
+                            )
+                            .push(
+                                Button::new(Text::new("Отмена"))
+                                    .on_press(Message::ConductLessonClicked(0,0)) // Заглушки, просто для закрытия модального окна
+                                // Или лучше, новое сообщение типа Message::CancelAttendance
+                            )
+                    )
             )
-                .width(Length::Fill).height(Length::Fill)
-                .center_y(Length::Fill)
-                .center_x(Length::Fill)
-                .style(move |_| background(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.7 }));
-            ui_stack = ui_stack.push(assignments_modal_overlay);
-        }
+                .style(move |_| bordered_box(&app.theme))
+        );
     }
 
     Container::new(ui_stack)

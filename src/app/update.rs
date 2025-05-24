@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use tokio::task;
 use tokio::task::spawn_blocking;
-use crate::app::state::{Assignment, AssignmentType, Config, Course, Group, LessonWithAssignments, Level, Screen, TextInputOrEditorInput, UserInfo, CONFIG_FILE, DEFAULT_AVATAR, PATH_TO_DB};
+use crate::app::state::{Assignment, AssignmentType, Config, Course, Group, LessonWithAssignments, Level, Screen, StudentAttendance, TextInputOrEditorInput, UserInfo, CONFIG_FILE, DEFAULT_AVATAR, PATH_TO_DB};
 use crate::db;
 use crate::screens::settings::theme_to_str;
 use super::{App, Message};
@@ -1126,11 +1126,6 @@ impl App {
                 Task::none()
             }
             Message::AddStudentToGroup(student_id, group_id) => {
-                // ... ваш существующий код для вызова db::add_student_to_group ...
-                // и обработки результата.
-                // Важно, чтобы db_conn был клонирован для асинхронной задачи.
-                let teacher_id = self.current_user.as_ref().map(|u| u.id).unwrap_or(0); // Получаем ID текущего учителя
-
                 Task::perform(
                     async move {
                         let mut conn = Connection::open(PATH_TO_DB).unwrap();
@@ -1156,10 +1151,7 @@ impl App {
             Message::RemoveStudentFromGroup(student_id, group_id) => {
                 println!("DEBUG: Попытка удалить студента ID: {} из группы ID: {}", student_id, group_id);
 
-                // Клонируем group_id для использования в асинхронной задаче и в замыкании результата
-                // Поскольку i32 является Copy, это создаст независимую копию.
                 let group_id_for_async_task = group_id; // Для асинхронной задачи db
-                let group_id_for_result_closure = group_id; // Для замыкания |result|
                 let teacher_id = self.current_user.as_ref().map(|u| u.id).unwrap_or(0);
 
                 Task::perform(
@@ -1384,122 +1376,6 @@ impl App {
                 }
                 Task::none() // Возвращаем Task::none()
             }
-            Message::StartEditingTeacherAssignment(assignment) => {
-                self.editing_teacher_assignment = Some(assignment.clone());
-                self.editing_teacher_assignment_title = assignment.title;
-                if assignment.assignment_type == "Lecture" || assignment.assignment_type == "Practice" {
-                    self.editing_teacher_assignment_description_content = text_editor::Content::with_text(&assignment.description);
-                    self.editing_teacher_assignment_description_text_input.clear();
-                } else {
-                    self.editing_teacher_assignment_description_text_input = assignment.description;
-                    self.editing_teacher_assignment_description_content = text_editor::Content::new();
-                }
-                self.teacher_assignment_edit_error_message = None;
-                Task::none()
-            }
-            Message::EditingTeacherAssignmentDescriptionChanged(input) => {
-                match input {
-                    TextInputOrEditorInput::TextInput(s) => {
-                        self.editing_teacher_assignment_description_text_input = s;
-                    }
-                    TextInputOrEditorInput::TextEditor(action) => {
-                        self.editing_teacher_assignment_description_content.perform(action);
-                    }
-                }
-                Task::none()
-            }
-            Message::TeacherAssignmentsLoaded(result) => {
-                match result {
-                    Ok(assignments) => {
-                        self.teacher_lesson_assignments = assignments;
-                    }
-                    Err(e) => {
-                        self.teacher_assignment_edit_error_message = Some(e);
-                    }
-                }
-                Task::none()
-            }
-            Message::SelectedAssignmentToAddToLesson(assignment) => {
-                self.selected_assignment_to_add_to_lesson = Some(assignment);
-                Task::none()
-            }
-            Message::AddExistingAssignmentToProvenLesson => {
-                if let Some(proven_lesson) = &self.selected_proven_lesson_for_assignments {
-                    if let Some(assignment) = &self.selected_assignment_to_add_to_lesson {
-                        return Task::perform(
-                            add_existing_assignment_to_proven_lesson(proven_lesson.id, assignment.id),
-                            Message::ExistingAssignmentAdded,
-                        );
-                    }
-                }
-                self.teacher_assignment_edit_error_message = Some("Не выбрано задание для добавления.".to_string());
-                Task::none()
-            }
-            Message::ExistingAssignmentAdded(result) => {
-                match result {
-                    Ok(_) => {
-                        self.teacher_assignment_edit_error_message = None;
-                        // Перезагрузить задания для текущего занятия
-                        if let Some(proven_lesson) = &self.selected_proven_lesson_for_assignments {
-                            return Task::perform(
-                                load_teacher_assignments_for_proven_lesson(proven_lesson.id),
-                                Message::TeacherAssignmentsLoaded,
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        self.teacher_assignment_edit_error_message = Some(e);
-                    }
-                }
-                Task::none()
-            }
-            Message::DeleteProvenLessonAssignment(_proven_lesson_id, assignment_id) => {
-                if let Some(proven_lesson) = &self.selected_proven_lesson_for_assignments {
-                    let proven_lesson_id = proven_lesson.id;
-                    return Task::perform(
-                        delete_proven_lesson_assignment(proven_lesson_id, assignment_id),
-                        Message::ProvenLessonAssignmentDeleted,
-                    );
-                }
-                self.teacher_assignment_edit_error_message = Some("Ошибка удаления задания: не выбрано занятие.".to_string());
-                Task::none()
-            }
-            Message::ProvenLessonAssignmentDeleted(result) => {
-                match result {
-                    Ok(_) => {
-                        self.teacher_assignment_edit_error_message = None;
-                        // Перезагрузить задания для текущего занятия
-                        if let Some(proven_lesson) = &self.selected_proven_lesson_for_assignments {
-                            return Task::perform(
-                                load_teacher_assignments_for_proven_lesson(proven_lesson.id),
-                                Message::TeacherAssignmentsLoaded,
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        self.teacher_assignment_edit_error_message = Some(e);
-                    }
-                }
-                Task::none()
-            }
-            Message::TeacherAssignmentSaved(result) => {
-                match result {
-                    Ok(_) => {
-                        self.teacher_assignment_edit_error_message = None;
-                        // Перезагрузить задания после сохранения
-                        if let Some(proven_lesson) = &self.selected_proven_lesson_for_assignments {
-                            return Task::perform(
-                                load_teacher_assignments_for_proven_lesson(proven_lesson.id),
-                                Message::TeacherAssignmentsLoaded,
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        self.teacher_assignment_edit_error_message = Some(e);
-                    }
-                }
-                Task::none()
-            }
             Message::GoToClasses => {
                 self.current_screen = Screen::Classes;
                 if let Some(user) = &self.current_user {
@@ -1575,7 +1451,7 @@ impl App {
                     )
                 ])
             }
-            Message::ConductLesson(lesson_id, group_id) => {
+            Message::ConductLessonClicked(lesson_id, group_id) => {
                 println!("DEBUG: Handling ConductLesson for lesson_id: {}, group_id: {}", lesson_id, group_id);
                 let group_id_clone = group_id;
                 let lesson_id_clone = lesson_id;
@@ -1668,48 +1544,6 @@ impl App {
                         self.error_message = e.to_string();
                         Task::none()
                     }
-                }
-            }
-            Message::CloseTeacherAssignmentModal => {
-                self.show_teacher_assignment_modal = false;
-                self.selected_proven_lesson_for_assignments = None;
-                self.teacher_lesson_assignments.clear();
-                self.available_assignments.clear();
-                self.selected_assignment_to_add_to_lesson = None;
-                self.editing_teacher_assignment = None;
-                self.teacher_assignment_edit_error_message = None;
-                Task::none()
-            }
-            Message::EditingTeacherAssignmentTitleChanged(value) => {
-                self.editing_teacher_assignment_title = value;
-                Task::none() // Никаких побочных эффектов
-            }
-            Message::SaveEditedTeacherAssignment => {
-                if let Some(mut assignment_to_edit) = self.editing_teacher_assignment.clone() {
-                    let new_title = self.editing_teacher_assignment_title.trim().to_string();
-                    if new_title.is_empty() {
-                        self.teacher_assignment_edit_error_message = Some("Название задания не может быть пустым.".to_string());
-                        return Task::none(); // Если ошибка валидации, останавливаемся
-                    }
-
-                    assignment_to_edit.title = new_title;
-                    assignment_to_edit.description = if assignment_to_edit.assignment_type == "Lecture" || assignment_to_edit.assignment_type == "Practice" {
-                        self.editing_teacher_assignment_description_content.text()
-                    } else {
-                        self.editing_teacher_assignment_description_text_input.clone()
-                    };
-
-                    let updated_assignment = assignment_to_edit.clone();
-                    self.editing_teacher_assignment = None;
-                    self.editing_teacher_assignment_title.clear();
-                    self.editing_teacher_assignment_description_text_input.clear();
-                    self.editing_teacher_assignment_description_content = text_editor::Content::new();
-
-                    // Возвращаем Task::perform
-                    Task::perform(update_assignment(updated_assignment), Message::TeacherAssignmentSaved)
-                } else {
-                    self.teacher_assignment_edit_error_message = Some("Нет задания для сохранения.".to_string());
-                    Task::none() // Если нет задания для редактирования
                 }
             }
             Message::DeleteLesson(lesson_id) => {
@@ -2354,6 +2188,154 @@ impl App {
                 // Просто возвращаем пустую команду.
                 Task::none()
             }
+            // Обработка клика для открытия модального окна
+            Message::OpenConductLessonModal(lesson_id, group_id) => {
+                // Сохраняем контекст для модального окна
+                self.current_lesson_to_conduct = self.selected_group_lessons_with_assignments
+                    .iter()
+                    .find(|l| l.id == lesson_id)
+                    .cloned();
+                self.current_group_for_attendance = self.selected_group_for_classes.clone();
+                self.show_conduct_lesson_modal = true;
+
+                // Загружаем студентов для выбранной группы
+                let group_id_clone = group_id;
+                Task::perform(
+                    async move {
+                        spawn_blocking(move || {
+                            let conn = Connection::open(PATH_TO_DB)
+                                .map_err(|e| format!("Не удалось открыть БД для загрузки студентов: {}", e))?;
+                            db::get_students_in_group(&conn, group_id_clone) // Вам понадобится эта новая функция БД
+                                .map_err(|e| format!("Ошибка загрузки студентов для посещаемости: {}", e))
+                        }).await.unwrap_or_else(|join_err| {
+                            Err(format!("Блокирующая задача для загрузки студентов завершилась ошибкой: {:?}", join_err))
+                        })
+                    },
+                    |result: Result<Vec<UserInfo>, String>| { // Явно указываем, что входной тип - Vec<UserInfo>
+                        let converted_result = result.map(|user_infos| {
+                            user_infos.into_iter().map(|user_info| {
+                                StudentAttendance {
+                                    id: user_info.id,
+                                    name: user_info.name,
+                                    present: true, // По умолчанию true
+                                }
+                            }).collect()
+                        });
+                        Message::StudentsForAttendanceLoaded(converted_result)
+                    },
+                )
+            }
+
+            // Callback, когда студенты загружены для отметки посещаемости
+            Message::StudentsForAttendanceLoaded(result) => {
+                match result {
+                    Ok(students) => {
+                        // Инициализируем всех студентов как присутствующих по умолчанию
+                        self.students_for_attendance = students.into_iter().map(|s| StudentAttendance {
+                            id: s.id,
+                            name: s.name,
+                            present: true, // По умолчанию присутствуют
+                        }).collect();
+                        Task::none()
+                    }
+                    Err(e) => {
+                        eprintln!("Ошибка загрузки студентов для посещаемости: {}", e);
+                        self.error_message = e.to_string();
+                        self.show_conduct_lesson_modal = false; // Закрываем модальное окно при ошибке
+                        Task::none()
+                    }
+                }
+            }
+
+            // Переключение посещаемости студента в модальном окне
+            Message::ToggleStudentAttendance(student_id) => {
+                if let Some(student) = self.students_for_attendance.iter_mut().find(|s| s.id == student_id) {
+                    student.present = !student.present;
+                }
+                Task::none()
+            }
+
+            // При нажатии кнопки "Сохранить посещаемость" в модальном окне
+            Message::SaveAttendance => {
+                if let (Some(lesson), Some(group)) = (&self.current_lesson_to_conduct, &self.current_group_for_attendance) {
+                    let lesson_id = lesson.id;
+                    let group_id = group.id;
+                    let students_to_save = self.students_for_attendance.clone(); // Клонируем для перемещения в асинхронный блок
+
+                    self.show_conduct_lesson_modal = false; // Немедленно закрываем модальное окно
+
+                    Task::perform(
+                        async move {
+                            spawn_blocking(move || {
+                                let mut conn = Connection::open(PATH_TO_DB) // Удалите 'mut', если не изменяете conn после открытия
+                                    .map_err(|e| format!("Не удалось открыть БД для сохранения посещаемости: {}", e))?;
+
+                                // Начинаем транзакцию для атомарности
+                                let tx = conn.transaction()
+                                    .map_err(|e| format!("Ошибка начала транзакции: {}", e))?; // <--- ИСПРАВЛЕНИЕ ЗДЕСЬ
+
+                                // 1. Добавляем PastSession
+                                let past_session_id = db::add_past_session(&tx, group_id, lesson_id)
+                                    .map_err(|e| format!("Ошибка добавления PastSession: {}", e))?; // <--- ИСПРАВЛЕНИЕ ЗДЕСЬ (и для других db:: вызовов)
+
+                                // 2. Добавляем записи о посещаемости
+                                for student in students_to_save {
+                                    let present_status = if student.present { "Present" } else { "Absent" };
+                                    db::add_attendance(&tx, group_id, past_session_id, student.id, present_status)
+                                        .map_err(|e| format!("Ошибка добавления записи посещаемости: {}", e))?; // <--- ИСПРАВЛЕНИЕ ЗДЕСЬ
+                                }
+
+                                tx.commit()
+                                    .map_err(|e| format!("Ошибка фиксации транзакции: {}", e))?; // <--- ИСПРАВЛЕНИЕ ЗДЕСЬ
+
+                                // 3. Перезагружаем PastSessions для группы
+                                db::get_past_sessions_for_group(&conn, group_id)
+                                    .map_err(|e| format!("Ошибка перезагрузки PastSessions после сохранения: {}", e))
+                            }).await.unwrap_or_else(|join_err| {
+                                Err(format!("Блокирующая задача (сохранение посещаемости) завершилась ошибкой: {:?}", join_err))
+                            })
+                        },
+                        |result| Message::AttendanceSavedResult(result), // Используем замыкание
+                    )
+                } else {
+                    eprintln!("Ошибка: Отсутствует информация об уроке или группе для сохранения посещаемости.");
+                    Task::none()
+                }
+            }
+
+            // Callback после сохранения посещаемости и перезагрузки PastSessions
+            Message::AttendanceSavedResult(result) => {
+                println!("DEBUG: Обработка AttendanceSavedResult: {:?}", result.is_ok());
+                if result.is_err() {
+                    println!("DEBUG: Ошибка AttendanceSavedResult: {:?}", result.clone().unwrap_err());
+                }
+                match result {
+                    Ok(past_sessions) => {
+                        println!("DEBUG: Успешно отмечена посещаемость. Проведенные занятия загружены: {}", past_sessions.len());
+                        self.past_sessions_for_group = past_sessions;
+
+                        if let Some(group) = &self.selected_group_for_classes {
+                            println!("DEBUG: Отправляем SelectGroupForClasses для ID группы: {}", group.id);
+                            let group_clone = group.clone();
+                            // Повторно выбираем группу, чтобы обновить уроки/задания и посещаемость в UI, если это необходимо
+                            Task::perform(
+                                async move {
+                                    Message::SelectGroupForClasses(group_clone)
+                                },
+                                |msg| msg
+                            )
+                        } else {
+                            println!("DEBUG: Нет выбранной группы, невозможно перевыбрать.");
+                            Task::none()
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Ошибка сохранения посещаемости или перезагрузки списка: {}", e);
+                        self.error_message = e.to_string();
+                        Task::none()
+                    }
+                }
+            }
         }
         
     }
@@ -2419,22 +2401,4 @@ async fn load_teacher_groups(teacher_email: String) -> Result<Vec<Group>, String
 
     db::get_groups_for_teacher(&conn, teacher_id)
         .map_err(|e| format!("Failed to load groups for teacher {}: {}", teacher_id, e))
-}
-async fn load_teacher_assignments_for_proven_lesson(proven_lesson_id: i32) -> Result<Vec<Assignment>, String> {
-    let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
-    db::get_assignments_for_proven_lesson(&conn, proven_lesson_id).map_err(|e| e.to_string())
-}
-
-async fn update_assignment(assignment: Assignment) -> Result<(), String> {
-    let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
-    db::update_assignment(&conn, &assignment).map_err(|e| e.to_string())
-}
-async fn add_existing_assignment_to_proven_lesson(proven_lesson_id: i32, assignment_id: i32) -> Result<(), String> {
-    let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
-    db::add_assignment_to_proven_lesson(&conn, proven_lesson_id, assignment_id).map_err(|e| e.to_string())
-}
-
-async fn delete_proven_lesson_assignment(proven_lesson_id: i32, assignment_id: i32) -> Result<(), String> {
-    let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
-    db::delete_assignment_from_proven_lesson(&conn, proven_lesson_id, assignment_id).map_err(|e| e.to_string())
 }

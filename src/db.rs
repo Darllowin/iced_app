@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use image::imageops::FilterType;
 use image::ImageReader;
-use rusqlite::{params, Connection, OptionalExtension, Result, Error, ffi};
+use rusqlite::{params, Connection, OptionalExtension, Result, Error, ffi, Transaction};
 use serde::de::StdError;
 use tokio::task;
 use crate::app::state::{Assignment, Course, Group, LessonWithAssignments, PastSession, Payment, UserInfo, PATH_TO_DB};
@@ -122,7 +122,7 @@ pub fn db_get_child_count_for_parent(conn: &Connection, parent_id: i32) -> Resul
 // При регистрации нового пользователя AvatarData может быть NULL по умолчанию
 pub fn register_user(conn: &Connection, full_name: &str, birthday: &str, email: &str, password_hash: &str) -> Result<()> {
     conn.execute(
-        "INSERT INTO Users (Name, Type, Birthday, Email, password, AvatarData) VALUES (?1, 'unconfirmed', ?2, ?3, ?4, NULL)", 
+        "INSERT INTO Users (Name, Type, Birthday, Email, password, AvatarData) VALUES (?1, 'unconfirmed', ?2, ?3, ?4, NULL)",
         params![full_name, birthday, email, password_hash],
     )?;
     Ok(())
@@ -194,7 +194,7 @@ pub fn get_courses(conn: &Connection) -> Result<Vec<Course>> {
             description: row.get("description")?,
             level: row.get("level").ok(),
             lesson_count: row.get("LessonCount")?,
-            total_seats: row.get("total_seats")?, 
+            total_seats: row.get("total_seats")?,
             seats: row.get("seats")?,
             price: row.get("price")?,
         })
@@ -895,47 +895,6 @@ pub fn get_groups_for_teacher(conn: &Connection, teacher_id: i32) -> Result<Vec<
 
     Ok(groups)
 }
-pub fn get_assignments_for_proven_lesson(conn: &Connection, proven_lesson_id: i32) -> Result<Vec<Assignment>> {
-    let mut stmt = conn.prepare("
-        SELECT
-            A.id,
-            A.lesson_id, -- Это lesson_id из таблицы Assignment, не ProvenLesson
-            A.title,
-            A.description,
-            A.type
-        FROM Assignment A
-        JOIN ProvenLessonAssignment PLA ON A.id = PLA.assignment_id
-        WHERE PLA.proven_lesson_id = ?1
-        ORDER BY A.title
-    ")?;
-    let assignment_iter = stmt.query_map(params![proven_lesson_id], |row| {
-        Ok(Assignment {
-            id: row.get(0)?,
-            lesson_id: row.get(1)?, // Это ID базового урока, к которому привязано задание
-            title: row.get(2)?,
-            description: row.get(3)?,
-            assignment_type: row.get(4)?,
-        })
-    })?;
-    assignment_iter.collect()
-}
-// Добавить существующее задание к запланированному уроку
-pub fn add_assignment_to_proven_lesson(conn: &Connection, proven_lesson_id: i32, assignment_id: i32) -> Result<()> {
-    conn.execute(
-        "INSERT INTO ProvenLessonAssignment (proven_lesson_id, assignment_id) VALUES (?1, ?2)",
-        params![proven_lesson_id, assignment_id],
-    )?;
-    Ok(())
-}
-
-// Удалить задание из запланированного урока
-pub fn delete_assignment_from_proven_lesson(conn: &Connection, proven_lesson_id: i32, assignment_id: i32) -> Result<()> {
-    conn.execute(
-        "DELETE FROM ProvenLessonAssignment WHERE proven_lesson_id = ?1 AND assignment_id = ?2",
-        params![proven_lesson_id, assignment_id],
-    )?;
-    Ok(())
-}
 pub fn get_past_sessions_for_group(conn: &Connection, group_id: i32) -> Result<Vec<PastSession>> {
     let mut stmt = conn.prepare("
         SELECT
@@ -965,22 +924,15 @@ pub fn get_past_sessions_for_group(conn: &Connection, group_id: i32) -> Result<V
     let sessions: Vec<PastSession> = sessions_iter.collect::<Result<Vec<_>, Error>>()?;
     Ok(sessions)
 }
-pub fn add_past_session(conn: &Connection, group_id: i32, lesson_id: i32) -> Result<()> {
-    println!("DB: Attempting to add PastSession for group_id: {}, lesson_id: {}", group_id, lesson_id);
-    let result = conn.execute(
-        "INSERT INTO PastSessions (group_id, date, lesson_id) VALUES (?1, date('now'), ?2)",
-        params![group_id, lesson_id],
-    );
-    match result {
-        Ok(rows_affected) => {
-            println!("DB: PastSession added successfully. Rows affected: {}", rows_affected);
-            Ok(())
-        }
-        Err(e) => {
-            println!("DB: Error adding PastSession: {}", e);
-            Err(e)
-        }
-    }
+pub fn add_past_session(conn: &Connection, group_id: i32, lesson_id: i32) -> Result<i32> {
+    let now: chrono::DateTime<chrono::Local> = chrono::Local::now();
+    let date_str = now.format("%Y-%m-%d %H:%M:%S").to_string(); // Формат ГГГГ-ММ-ДД ЧЧ:ММ:СС
+
+    conn.execute(
+        "INSERT INTO PastSessions (group_id, date, lesson_id) VALUES (?1, ?2, ?3)",
+        params![group_id, date_str, lesson_id],
+    )?;
+    Ok(conn.last_insert_rowid() as i32) // Возвращаем ID
 }
 pub fn get_all_payments_with_details(conn: &Connection) -> Result<Vec<Payment>> {
     let mut stmt = conn.prepare("
@@ -1129,7 +1081,7 @@ pub fn delete_payment(conn: &Connection, course_id: i32) -> Result<()> {
 }
 pub fn load_payments(conn: &Connection) -> Result<Vec<Payment>> {
     let mut stmt = conn.prepare("
-        SELECT 
+        SELECT
             p.id,
             p.student_id,
             u.name AS student_name,
@@ -1165,4 +1117,17 @@ pub fn load_payments(conn: &Connection) -> Result<Vec<Payment>> {
         .collect();
 
     Ok(payments)
+}
+pub fn add_attendance(
+    tx: &Transaction, // Используем транзакцию для атомарности
+    group_id: i32,
+    past_session_id: i32, // Это должен быть ID записи PastSessions
+    student_id: i32,
+    present_status: &str, // "Present" или "Absent"
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO Attendance (group_id, lesson_id, student_id, present) VALUES (?1, ?2, ?3, ?4)",
+        params![group_id, past_session_id, student_id, present_status],
+    )?;
+    Ok(())
 }

@@ -7,11 +7,10 @@ use iced::widget::container::{background, bordered_box};
 use iced::widget::{button, horizontal_space, row, text, PickList, Rule, TextEditor};
 use rusqlite::Connection;
 use crate::app::{App, Message};
-use crate::app::state::{AssignmentType, Course, Level, TextInputOrEditorInput, UserInfo, PATH_TO_DB};
+use crate::app::state::{AssignmentType, Course, Level, TextInputOrEditorInput, PATH_TO_DB};
 // Импортируем Lesson
 use crate::db;
 
-// <-- Обновляем headrbar, чтобы кнопка "Занятия" отправляла правильное сообщение
 fn headrbar(course: Course) -> Row<'static, Message> { // Передаем тему
     row![
         row![

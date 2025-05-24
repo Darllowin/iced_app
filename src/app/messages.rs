@@ -1,5 +1,5 @@
 use iced_aw::date_picker::Date;
-use crate::app::state::{Assignment, AssignmentType, Course, CoursePickListItem, Group, GroupPickListItem, LessonWithAssignments, Level, PastSession, Payment, StudentPickListItem, TextInputOrEditorInput, UserInfo};
+use crate::app::state::{Assignment, AssignmentType, Course, CoursePickListItem, Group, GroupPickListItem, LessonWithAssignments, Level, PastSession, Payment, StudentAttendance, StudentPickListItem, TextInputOrEditorInput, UserInfo};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -118,31 +118,13 @@ pub enum Message {
     TeacherGroupsLoaded(Result<Vec<Group>, String>), // Result для обработки ошибок
     SelectGroupForClasses(Group),
 
-    // Для модального окна заданий преподавателя
-    CloseTeacherAssignmentModal,
-    TeacherAssignmentsLoaded(Result<Vec<Assignment>, String>),
-
-    // Для редактирования задания в модальном окне преподавателя
-    StartEditingTeacherAssignment(Assignment), // Для предварительного заполнения полей ввода
-    EditingTeacherAssignmentTitleChanged(String),
-    EditingTeacherAssignmentDescriptionChanged(TextInputOrEditorInput), // Может быть действием TextEditor или строкой TextInput
-    SaveEditedTeacherAssignment,
-    TeacherAssignmentSaved(Result<(), String>), // Result для обратной связи
-
-    // Для добавления существующих заданий к запланированному уроку
-    SelectedAssignmentToAddToLesson(Assignment),
-    AddExistingAssignmentToProvenLesson,
-    ExistingAssignmentAdded(Result<(), String>),
-    DeleteProvenLessonAssignment(i32, i32), // proven_lesson_id, assignment_id
-    ProvenLessonAssignmentDeleted(Result<(), String>),
-
     AssignmentsLoaded(Result<Vec<Assignment>, String>),
 
     // Cообщение для загрузки уроков с заданиями
     GroupLessonsWithAssignmentsLoaded(Result<Vec<LessonWithAssignments>, String>),
     // Сообщение для загрузки проведенных занятий (если будете их отображать)
     PastSessionsLoaded(Result<Vec<PastSession>, String>),
-    ConductLesson(i32, i32),
+    //ConductLesson(i32, i32),
 
     CourseLessonsLoaded(Result<Vec<LessonWithAssignments>, String>),
 
@@ -191,4 +173,11 @@ pub enum Message {
     CoursesWithSeatsFetched(Result<Vec<Course>, String>),
     GroupsForCourseFetched(Result<Vec<Group>, String>),
     NoOp,
+    //
+    ConductLessonClicked(i32, i32), // Старое ConductLesson, переименовано для ясности
+    OpenConductLessonModal(i32, i32), // Новое: для вызова модального окна
+    ToggleStudentAttendance(i32), // Для переключения чекбокса в модальном окне
+    SaveAttendance, // Для сохранения посещаемости и проведенного занятия
+    StudentsForAttendanceLoaded(Result<Vec<StudentAttendance>, String>), // Callback для загрузки студентов
+    AttendanceSavedResult(Result<Vec<PastSession>, String>), // Callback после сохранения посещаемости
 }

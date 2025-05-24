@@ -22,7 +22,6 @@ pub struct App {
     pub user_patronymic: String,
     pub user_email: String,
     pub user_birthday: String,
-    pub type_user: String,
     pub user_password: String,
     pub user_password_repeat: String,
     //
@@ -121,16 +120,9 @@ pub struct App {
     pub selected_group_for_classes: Option<Group>,
 
     // Состояние модального окна заданий преподавателя
-    pub selected_proven_lesson_for_assignments: Option<ProvenLesson>,
     pub show_teacher_assignment_modal: bool,
     pub teacher_lesson_assignments: Vec<Assignment>, // Задания, связанные с текущим запланированным уроком
     pub editing_teacher_assignment: Option<Assignment>, // Редактируемое задание
-    pub editing_teacher_assignment_title: String,
-    pub editing_teacher_assignment_description_text_input: String, // Для TextInput
-    pub editing_teacher_assignment_description_content: text_editor::Content, // Для TextEditor
-    pub teacher_assignment_edit_error_message: Option<String>,
-    pub available_assignments: Vec<Assignment>, // Список всех заданий для выбора
-    pub selected_assignment_to_add_to_lesson: Option<Assignment>,
 
     pub selected_group_lessons_with_assignments: Vec<LessonWithAssignments>,
     pub course_id_to_title: std::collections::HashMap<i32, String>,
@@ -168,7 +160,11 @@ pub struct App {
     pub groups_for_selected_course: Vec<Group>,
     // Для picklist'ов может понадобиться отслеживать выбранный индекс
     pub selected_payment_type_idx: Option<usize>,
-    
+    //
+    pub show_conduct_lesson_modal: bool, // Для управления видимостью модального окна
+    pub students_for_attendance: Vec<StudentAttendance>, // Для хранения данных о студентах в модальном окне
+    pub current_lesson_to_conduct: Option<LessonWithAssignments>, // Хранит урок, который проводится
+    pub current_group_for_attendance: Option<Group>, // Хранит группу для отметки посещаемости
 }
 
 impl Default for App {
@@ -193,7 +189,6 @@ impl Default for App {
             show_add_course_modal: false,
             new_course_title: "".to_string(),
             user_birthday: "".to_string(),
-            type_user: "".to_string(),
             new_course_description: "".to_string(),
             new_course_total_seats: 0,
             new_course_seats: 0,
@@ -255,16 +250,9 @@ impl Default for App {
             selected_group_for_classes: None,
             //proven_lessons: vec![],
             show_teacher_assignment_modal: false,
-            selected_proven_lesson_for_assignments: None,
             teacher_lesson_assignments: vec![],
             editing_teacher_assignment: None,
-            editing_teacher_assignment_title: "".to_string(),
-            editing_teacher_assignment_description_text_input: "".to_string(),
-            editing_teacher_assignment_description_content: Default::default(),
-            teacher_assignment_edit_error_message: None,
-            available_assignments: vec![],
             editing_assignment_description_text_input: "".to_string(),
-            selected_assignment_to_add_to_lesson: None,
             selected_group_lessons_with_assignments: vec![],
             course_id_to_title: Default::default(),
             edit_course_teacher_id: None,
@@ -294,11 +282,20 @@ impl Default for App {
             courses_with_seats: vec![],
             groups_for_selected_course: vec![],
             selected_payment_type_idx: None,
+            show_conduct_lesson_modal: false,
+            students_for_attendance: vec![],
+            current_lesson_to_conduct: None,
             new_payment_group: None,
+            current_group_for_attendance: None,
         }
     }
 }
-
+#[derive(Debug, Clone)]
+pub struct StudentAttendance {
+    pub id: i32,
+    pub name: String,
+    pub present: bool, // true, если присутствует; false, если отсутствует
+}
 #[derive(Debug, Clone)]
 pub struct Payment {
     pub id: i32,
