@@ -14,6 +14,7 @@ pub fn login_screen(app: &App) -> Container<Message> {
             .on_input(Message::PasswordChanged)
             .padding(10)
             .size(18)
+            .secure(true)
             .width(Length::Fixed(350.0)),
         button("Войти")
             .on_press(Message::LoginPressed)

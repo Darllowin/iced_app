@@ -7,6 +7,7 @@ pub mod nav_menu;
 pub mod user_list;
 pub mod groups;
 pub mod classes;
+pub mod payment;
 
 pub use login::login_screen;
 pub use register::register_screen;
@@ -17,3 +18,4 @@ pub use courses::courses_screen;
 pub use user_list::user_list_screen;
 pub use groups::groups_screen;
 pub use classes::classes_screen;
+pub use payment::payment_screen;

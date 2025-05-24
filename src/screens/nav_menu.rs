@@ -7,6 +7,7 @@ pub fn nav_menu(app: &App) -> Container<Message> {
     let content_for_admin = column![
         button("Профиль").on_press(Message::GoToProfile).width(Length::Fill),
         button("Курсы").on_press(Message::GoToCourses).width(Length::Fill),
+        button("Платежи").on_press(Message::GOToPayment).width(Length::Fill),
         button("Пользователи").on_press(Message::GoToUserList).width(Length::Fill),
         button("Группы").on_press(Message::GoToGroupList).width(Length::Fill),
         vertical_space(),
@@ -15,7 +16,7 @@ pub fn nav_menu(app: &App) -> Container<Message> {
     ]
         .spacing(10);
     
-    let content_for_student = column![
+    let content_for_unconfirmed = column![
         button("Профиль").on_press(Message::GoToProfile).width(Length::Fill),
         vertical_space(),
         button("Настройки").on_press(Message::GoToSettings).width(Length::Fill),
@@ -39,14 +40,8 @@ pub fn nav_menu(app: &App) -> Container<Message> {
                 .height(Length::Fill)
                 .padding(10)
         }
-        "student" => {
-            Container::new(content_for_student)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .padding(10)
-        }
-        "parent" => {
-            Container::new(content_for_student)
+        "unconfirmed" => {
+            Container::new(content_for_unconfirmed)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .padding(10)

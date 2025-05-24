@@ -40,7 +40,8 @@ fn content(group: Group, app: &App) -> Column<Message> {
 
 pub fn groups_screen(app: &App) -> Container<Message> {
     let filter = app.group_filter_text.to_lowercase();
-    let filtered_groups: Vec<Group> = app.teacher_groups
+    // Используем app.all_groups, так как этот экран только для администратора
+    let filtered_groups: Vec<Group> = app.all_groups // <-- ИСПОЛЬЗУЕМ app.all_groups
         .iter()
         .filter(|g| {
             g.name.to_lowercase().contains(&filter)

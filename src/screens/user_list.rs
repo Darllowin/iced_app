@@ -190,20 +190,24 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
     // Модалка детей
     if app.show_children_modal {
         let mut children_list = app.parent_children.iter().fold(Column::new().spacing(10).width(Length::Fill), |col, child| {
-            let avatar = if let Some(mut data) = child.avatar_data.clone() {
-                data.extend_from_slice(child.email.as_bytes());
-                let image_handle = Handle::from_bytes(data);
+            let avatar = Container::new(
+                if let Some(mut data) = child.avatar_data.clone() {
+                    data.extend_from_slice(child.email.as_bytes());
+                    let image_handle = Handle::from_bytes(data);
 
-                image(image_handle)
-                    .width(Length::Fixed(100.0))
-                    .height(Length::Fixed(100.0))
-                    .content_fit(ContentFit::Cover)
-            } else {
-                image(DEFAULT_AVATAR)
-                    .width(Length::Fixed(100.0))
-                    .height(Length::Fixed(100.0))
-                    .content_fit(ContentFit::Cover)
-            };
+                    image(image_handle)
+                        .width(Length::Fixed(100.0))
+                        .height(Length::Fixed(100.0))
+                        .content_fit(ContentFit::Cover)
+                } else {
+                    image(DEFAULT_AVATAR)
+                        .width(Length::Fixed(100.0))
+                        .height(Length::Fixed(100.0))
+                        .content_fit(ContentFit::Cover)
+                }
+            )
+                .width(Length::Fixed(100.0))
+                .height(Length::Fixed(100.0));
 
             let info = Column::new()
                 .spacing(5)
@@ -254,15 +258,15 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
         let modal_content = Column::new()
             .spacing(15)
             .push(Text::new("Список детей").size(24))
-            .push(Scrollable::new(children_list))
+            .push(Scrollable::new(children_list).height(Length::Fixed(400.0)))
             .push(add_row)
             .push(Button::new(Text::new("Закрыть")).on_press(Message::CloseParentChildrenModal));
 
         let modal = Container::new(modal_content)
             .style(move |_| bordered_box(&app.theme))
             .padding(20)
-            .height(Length::Fixed(500.0))
-            .width(Length::Fixed(800.0));
+            .height(Length::Fixed(600.0))
+            .width(Length::Fixed(900.0));
 
         let modal_overlay = Container::new(
             mouse_area(Container::new(modal).center(Length::Fill).padding(40))

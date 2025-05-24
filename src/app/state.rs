@@ -38,6 +38,9 @@ pub struct App {
     pub show_add_course_modal: bool,
     pub new_course_title: String,
     pub new_course_description: String,
+    pub new_course_total_seats: i32,
+    pub new_course_seats: i32,
+    pub new_course_price: f64,
     //pub new_course_instructor: Option<String>,
     pub new_course_level: Level,
     // Добавлены поля для редактирования курса
@@ -46,6 +49,9 @@ pub struct App {
     pub edit_course_description: String,
     pub edit_course_instructor: Option<String>,
     pub edit_course_level: Level,
+    pub edit_course_total_seats: i32,
+    pub edit_course_seats: i32,
+    pub edit_course_price: f64,
     //
     pub show_lessons_modal: bool,
     pub editing_lessons_course: Option<Course>,
@@ -128,12 +134,8 @@ pub struct App {
 
     pub selected_group_lessons_with_assignments: Vec<LessonWithAssignments>,
     pub course_id_to_title: std::collections::HashMap<i32, String>,
-
-    pub new_course_teacher: Option<UserInfo>,    // Уже есть, но теперь хранит UserInfo
-    pub edit_course_teacher: Option<UserInfo>,   // Уже есть, но теперь хранит UserInfo
-    pub new_course_teacher_id: Option<i32>,     // <--- ДОБАВЬТЕ ЭТО
+    
     pub edit_course_teacher_id: Option<i32>,
-    pub all_users: Vec<UserInfo>,
     pub all_courses: Vec<Course>,
     pub past_sessions_for_group: Vec<PastSession>, // Для отображения списка прошедших занятий
 
@@ -153,6 +155,20 @@ pub struct App {
     pub selected_group_for_students_name: Option<String>, // Для отображения названия группы в модалке
     pub selected_group_students: Vec<UserInfo>,
     pub is_loading_group_students: bool,
+    pub all_groups: Vec<Group>,
+    // Payment
+    pub payments: Vec<Payment>,
+    pub show_add_payment_modal: bool,
+    pub new_payment_student: Option<StudentPickListItem>,
+    pub new_payment_course: Option<CoursePickListItem>,
+    pub new_payment_group: Option<GroupPickListItem>,
+    pub new_payment_amount: Option<f64>, // Будет заполняться автоматически
+    pub new_payment_type: String, // Например, "enrollment" или "monthly"
+    pub courses_with_seats: Vec<Course>,
+    pub groups_for_selected_course: Vec<Group>,
+    // Для picklist'ов может понадобиться отслеживать выбранный индекс
+    pub selected_payment_type_idx: Option<usize>,
+    
 }
 
 impl Default for App {
@@ -179,6 +195,9 @@ impl Default for App {
             user_birthday: "".to_string(),
             type_user: "".to_string(),
             new_course_description: "".to_string(),
+            new_course_total_seats: 0,
+            new_course_seats: 0,
+            new_course_price: 0f64,
             new_course_level: Level::Beginner,
             editing_course: None,
             edit_course_title: "".to_string(),
@@ -186,6 +205,9 @@ impl Default for App {
             edit_course_instructor: None,
             user_avatar_data: None,
             edit_course_level: Level::Beginner,
+            edit_course_total_seats: 0,
+            edit_course_seats: 0,
+            edit_course_price: 0f64,
             show_lessons_modal: false,
             editing_lessons_course: None,
             course_lessons: vec![],
@@ -245,11 +267,7 @@ impl Default for App {
             selected_assignment_to_add_to_lesson: None,
             selected_group_lessons_with_assignments: vec![],
             course_id_to_title: Default::default(),
-            new_course_teacher: None,
-            edit_course_teacher: None,
-            new_course_teacher_id: None,
             edit_course_teacher_id: None,
-            all_users: vec![],
             all_courses: vec![],
             past_sessions_for_group: vec![],
             show_group_lessons_modal: false,
@@ -266,9 +284,35 @@ impl Default for App {
             selected_group_for_students_name: None,
             selected_group_students: vec![],
             is_loading_group_students: false,
+            all_groups: vec![],
+            payments: vec![],
+            show_add_payment_modal: false,
+            new_payment_student: None,
+            new_payment_course: None,
+            new_payment_amount: None,
+            new_payment_type: "".to_string(),
+            courses_with_seats: vec![],
+            groups_for_selected_course: vec![],
+            selected_payment_type_idx: None,
+            new_payment_group: None,
         }
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct Payment {
+    pub id: i32,
+    pub student_id: i32,
+    pub date: String, 
+    pub amount: f64,
+    pub payment_type: String, 
+    pub course_id: i32,
+    pub group_id: i32,
+    pub student_name: String,
+    pub course_title: String,
+    pub group_name: String,
+}
+
 
 #[derive(Debug, Clone, Eq, Hash, PartialOrd, Ord)]
 pub struct UserInfo {
@@ -416,7 +460,6 @@ pub struct PastSession {
     pub group_id: i32,
     pub date: String,
     pub lesson_id: i32,
-    // Можете добавить сюда информацию об уроке, если нужно:
     pub lesson_number: Option<i32>,
     pub lesson_title: Option<String>,
 }
@@ -440,10 +483,11 @@ pub struct ProvenLesson {
 pub struct Course {
     pub id: i32,
     pub title: String,
-    pub description: String,
-    pub instructor_id: Option<i32>,   // <--- Новое поле для ID преподавателя
-    pub instructor_name: Option<String>,
+    pub description: Option<String>,
     pub level: Option<String>,
+    pub total_seats: Option<i32>,
+    pub seats: Option<i32>, 
+    pub price: Option<f64>,
     pub lesson_count: i32,
 }
 
@@ -494,6 +538,44 @@ impl FromStr for Level {
     }
 }
 
+// --- СТРУКТУРЫ ДЛЯ PICKLIST ЭЛЕМЕНТОВ ---
+#[derive(Debug, Clone, PartialEq)]
+pub struct StudentPickListItem {
+    pub id: i32,
+    pub name: String,
+}
+
+impl fmt::Display for StudentPickListItem { // Используем импортированный fmt
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoursePickListItem {
+    pub id: i32,
+    pub title: String,
+    pub price_display: String, // String representation of price
+}
+
+impl fmt::Display for CoursePickListItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({})", self.title, self.price_display)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GroupPickListItem {
+    pub id: i32,
+    pub name: String,
+}
+
+impl fmt::Display for GroupPickListItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Config {
     pub theme_name: String,
@@ -509,4 +591,5 @@ pub enum Screen {
     UserList,
     GroupList,
     Classes,
+    Payment
 }

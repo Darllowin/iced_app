@@ -44,11 +44,13 @@ pub fn register_screen(app: &App) -> Container<Message> {
             .on_input(Message::PasswordChanged)
             .padding(10)
             .size(18)
+            .secure(true)
             .width(Length::Fixed(350.0)),
         text_input("Повторите пароль", &app.user_password_repeat)
             .on_input(Message::PasswordRepeatChanged)
             .padding(10)
             .size(18)
+            .secure(true)
             .width(Length::Fixed(350.0)),
         vertical_space(),
         if let Some(err) = &app.register_error {

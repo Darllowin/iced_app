@@ -1,5 +1,5 @@
 use iced_aw::date_picker::Date;
-use crate::app::state::{Assignment, AssignmentType, Course, Group, LessonWithAssignments, Level, PastSession, TextInputOrEditorInput, UserInfo};
+use crate::app::state::{Assignment, AssignmentType, Course, CoursePickListItem, Group, GroupPickListItem, LessonWithAssignments, Level, PastSession, Payment, StudentPickListItem, TextInputOrEditorInput, UserInfo};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -22,6 +22,7 @@ pub enum Message {
     GoToUserList,
     GoToGroupList,
     GoToClasses,
+    GOToPayment,
     Logout,
     //
     ThemeSelected(&'static str),
@@ -34,19 +35,23 @@ pub enum Message {
     ChooseAvatar,
     AvatarChosen(Result<Vec<u8>, String>),
     //
-    NewCourseInstructorChanged(Option<UserInfo>),
     NewCourseLevelChanged(Level),
     ToggleAddCourseModal(bool),
     NewCourseTitleChanged(String),
     NewCourseDescriptionChanged(String),
+    NewCourseTotalSeatsChanged(i32),
+    NewCourseSeatsChanged(i32),
+    NewCoursePriceChanged(f64),
     SubmitNewCourse,
     DeleteCourse(i32),
     // Редактирование курса
     StartEditingCourse(Course),
     EditCourseTitleChanged(String),
     EditCourseDescriptionChanged(String),
-    EditCourseInstructorChanged(Option<UserInfo>),
     EditCourseLevelChanged(Level),
+    EditCourseTotalSeatsChanged(i32),
+    EditCourseSeatsChanged(i32),
+    EditCoursePriceChanged(f64),
     SubmitEditedCourse,
     CancelEditingCourse,
     // Редактирование пользователя
@@ -167,4 +172,23 @@ pub enum Message {
 
     AddStudentToGroup(i32, i32),
     SelectedStudentToAddChanged(UserInfo),
+    StudentsAndGroupsReloaded(i32, i32), // (group_id, teacher_id)
+    AllGroupsLoaded(Result<Vec<Group>, String>),
+    // Payment
+    PaymentsFetched(Result<Vec<Payment>, String>),
+    ToggleAddPaymentModal,
+    NewPaymentFormStudentSelected(StudentPickListItem), 
+    NewPaymentFormCourseSelected(CoursePickListItem),   
+    NewPaymentFormGroupSelected(GroupPickListItem),
+    NewPaymentFormTypeChanged(String),
+    AddPaymentConfirmed,
+    PaymentAdded(Result<(), String>),
+    PaymentsUpdated(Vec<Payment>),
+    DeletePayment(i32),
+    GroupsFetched(Result<Vec<Group>, String>),
+    // Сообщения для получения данных в модальном окне
+    StudentsWithoutGroupFetched(Result<Vec<UserInfo>, String>),
+    CoursesWithSeatsFetched(Result<Vec<Course>, String>),
+    GroupsForCourseFetched(Result<Vec<Group>, String>),
+    NoOp,
 }

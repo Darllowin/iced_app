@@ -63,41 +63,14 @@ pub fn profile_screen(app: &App) -> Container<Message> {
 
     if let Some(user_info) = user_data {
         match user_info.user_type.as_str() {
-            "student" => {
-                // Если пользователь - студент
-                if let Some(_group_id) = &user_info.group_id { // Предполагаем, что у студента есть _group_id
-                    if let Some(student_group) = &app.student_group_info {
-                        role_specific_content = role_specific_content.push(
-                            Container::new(
-                                column![
-                                    text(format!("Моя группа: {}", student_group.name)).size(24),
-                                    text(format!("Курс: {}", student_group.course_name.as_deref().unwrap_or("Неизвестно"))).size(24),
-                                ]
-                                    .spacing(5)
-                            )
-                                .width(Length::Fill)
-                                .center_x(Length::Fill)
-                                .padding(10)
-                                .style(move |_| bordered_box(&app.theme))
-                        );
-                    } else {
-                        role_specific_content = role_specific_content.push(
-                            Container::new(text("Данные группы загружаются...").size(24))
-                                .width(Length::Fill)
-                                .center_x(Length::Fill)
-                                .padding(10)
-                                .style(move |_| bordered_box(&app.theme))
-                        );
-                    }
-                } else {
-                    role_specific_content = role_specific_content.push(
-                        Container::new(text("Вы пока не прикреплены к группе.").size(24))
-                            .width(Length::Fill)
-                            .center_x(Length::Fill)
-                            .padding(10)
-                            .style(move |_| bordered_box(&app.theme))
-                    );
-                }
+            "unconfirmed" => {
+                role_specific_content = role_specific_content.push(
+                    Container::new(text("Ваша учётная запись ещё не подтверждена").size(24))
+                        .width(Length::Fill)
+                        .center_x(Length::Fill)
+                        .padding(10)
+                        .style(move |_| bordered_box(&app.theme))
+                );
             },
             "teacher" => {
                 // Если пользователь - преподаватель

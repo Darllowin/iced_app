@@ -14,6 +14,7 @@ rfd = { version = "0.12", default-features = false, features = ["xdg-portal"] }
 regex = "1.11.1"
 tokio = { version = "1.45.0", features = ["rt-multi-thread", "macros", "sync", "rt", "full"] }
 image = { version = "0.25.6", features = ["png" , "jpeg"] }
+chrono = "0.4.41"
 
 [target.x86_64-pc-windows-msvc]
 runner = "wine"

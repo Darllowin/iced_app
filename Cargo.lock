@@ -1795,6 +1795,7 @@ dependencies = [
 name = "iced-rs_app"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "iced",
  "iced_aw",
  "image 0.25.6",

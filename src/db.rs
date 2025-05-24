@@ -5,13 +5,7 @@ use image::ImageReader;
 use rusqlite::{params, Connection, OptionalExtension, Result, Error, ffi};
 use serde::de::StdError;
 use tokio::task;
-use crate::app::state::{Assignment, Course, Group, LessonWithAssignments, PastSession, UserInfo, PATH_TO_DB};
-
-pub enum LoginError {
-    UserNotFound,
-    WrongPassword,
-    DatabaseError(rusqlite::Error),
-}
+use crate::app::state::{Assignment, Course, Group, LessonWithAssignments, PastSession, Payment, UserInfo, PATH_TO_DB};
 
 
 pub async fn authenticate_and_get_user_data(
@@ -128,7 +122,7 @@ pub fn db_get_child_count_for_parent(conn: &Connection, parent_id: i32) -> Resul
 // При регистрации нового пользователя AvatarData может быть NULL по умолчанию
 pub fn register_user(conn: &Connection, full_name: &str, birthday: &str, email: &str, password_hash: &str) -> Result<()> {
     conn.execute(
-        "INSERT INTO Users (Name, Type, Birthday, Email, password, AvatarData) VALUES (?1, 'student', ?2, ?3, ?4, NULL)", // Изначально устанавливаем AvatarData в NULL
+        "INSERT INTO Users (Name, Type, Birthday, Email, password, AvatarData) VALUES (?1, 'unconfirmed', ?2, ?3, ?4, NULL)", 
         params![full_name, birthday, email, password_hash],
     )?;
     Ok(())
@@ -182,14 +176,14 @@ pub fn get_courses(conn: &Connection) -> Result<Vec<Course>> {
             C.ID,
             C.title,
             C.description,
-            C.instructor AS instructor_id,
-            U.Name AS instructor_name,
             C.level,
-            COUNT(L.ID) AS LessonCount
+            COUNT(L.ID) AS LessonCount,
+            C.total_seats,
+            C.seats,
+            C.price
         FROM Course C
-        LEFT JOIN Users U ON C.instructor = U.ID
         LEFT JOIN Lessons L ON C.ID = L.course_id
-        GROUP BY C.ID, C.title, C.description, C.instructor, U.Name, C.level
+        GROUP BY C.ID, C.title, C.description, C.level -- Убран U.Name
         ORDER BY C.title
     ")?;
 
@@ -198,25 +192,27 @@ pub fn get_courses(conn: &Connection) -> Result<Vec<Course>> {
             id: row.get("ID")?,
             title: row.get("title")?,
             description: row.get("description")?,
-            instructor_id: row.get("instructor_id")?,   // <--- Заполняем новый ID
-            instructor_name: row.get("instructor_name")?, // <--- Заполняем новое имя
             level: row.get("level").ok(),
             lesson_count: row.get("LessonCount")?,
+            total_seats: row.get("total_seats")?, 
+            seats: row.get("seats")?,
+            price: row.get("price")?,
         })
     })?;
 
     Ok(course_iter.collect::<Result<Vec<_>>>()?)
 }
 
-pub fn add_course(conn: &Connection, title: &str, description: &str, instructor_id: Option<i32>, level: Option<&str>) -> Result<()> {
+pub fn add_course(conn: &Connection, title: &str, description: &str, level: Option<&str>, seats: i32, price: f64, total_seats: i32) -> Result<()> {
     conn.execute(
-        // Используем instructor_id напрямую
-        "INSERT INTO Course (title, description, instructor, level) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO Course (title, description, level, seats, price, total_seats) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             title,
             description,
-            instructor_id, // <--- Теперь передаем Option<i32> напрямую
-            level
+            level,
+            seats,
+            price,
+            total_seats
         ],
     )?;
     Ok(())
@@ -272,12 +268,14 @@ pub fn get_all_users(conn: &Connection) -> Result<Vec<UserInfo>> {
 pub fn update_course(conn: &Connection, course: &Course) -> Result<()> {
     conn.execute(
         // Используем course.instructor_id напрямую, без подзапроса по имени
-        "UPDATE Course SET title = ?1, description = ?2, instructor = ?3, level = ?4 WHERE ID = ?5",
+        "UPDATE Course SET title = ?1, description = ?2, level = ?3, total_seats = ?4, seats = ?5, price =?6 WHERE ID = ?7",
         params![
             course.title,
             course.description,
-            course.instructor_id,
             course.level.as_deref(),
+            course.total_seats,
+            course.seats,
+            course.price,
             course.id
         ],
     )?;
@@ -293,14 +291,14 @@ pub fn get_all_groups(conn: &Connection) -> Result<Vec<Group>> {
             G.teacher_id,
             C.title AS course_name,
             U.Name AS teacher_name,
-            (SELECT COUNT(*) FROM GroupStudent GS WHERE GS.group_id = G.id) AS student_count
+            G.student_count
         FROM \"Group\" G
-        JOIN \"Course\" C ON G.course_id = C.ID
-        JOIN Users U ON G.teacher_id = U.ID
+        LEFT JOIN \"Course\" C ON G.course_id = C.ID
+        LEFT JOIN Users U ON G.teacher_id = U.ID
         ORDER BY G.name
-    ")?; // Обратите внимание: НЕТ УСЛОВИЯ WHERE G.teacher_id = ?1
+    ")?;
 
-    let groups_iter = stmt.query_map(params![], |row| { // params![] так как нет параметров
+    let groups_iter = stmt.query_map(params![], |row| {
         Ok(Group {
             id: row.get("id")?,
             name: row.get("name")?,
@@ -312,7 +310,7 @@ pub fn get_all_groups(conn: &Connection) -> Result<Vec<Group>> {
         })
     })?;
 
-    let groups: Vec<Group> = groups_iter.collect::<Result<Vec<_>, rusqlite::Error>>()?;
+    let groups: Vec<Group> = groups_iter.collect::<Result<Vec<_>, Error>>()?;
     println!("DEBUG DB: Загружено ВСЕХ групп: {} шт.", groups.len());
     Ok(groups)
 }
@@ -325,8 +323,8 @@ pub fn get_teacher_groups_with_details(conn: &Connection, teacher_id: i32) -> Re
             G.course_id,
             G.teacher_id,
             C.title AS course_name,
-            U.Name AS teacher_name, -- !!! ИЗМЕНЕНО: U.Name (с большой 'N')
-            (SELECT COUNT(*) FROM GroupStudent GS WHERE GS.group_id = G.id) AS student_count -- !!! ИЗМЕНЕНО: Имя таблицы и псевдоним
+            U.Name AS teacher_name,
+            G.student_count -- ИСПРАВЛЕНО: Теперь берем из столбца G.student_count
         FROM \"Group\" G
         JOIN \"Course\" C ON G.course_id = C.ID
         JOIN Users U ON G.teacher_id = U.ID
@@ -341,17 +339,15 @@ pub fn get_teacher_groups_with_details(conn: &Connection, teacher_id: i32) -> Re
             course_id: row.get("course_id")?,
             teacher_id: row.get("teacher_id")?,
             course_name: row.get("course_name")?,
-            teacher_name: row.get("teacher_name")?, // Теперь это должно правильно соответствовать "Name" из БД
+            teacher_name: row.get("teacher_name")?,
             student_count: row.get("student_count")?,
         })
     })?;
 
-    let groups: Vec<Group> = groups_iter.collect::<Result<Vec<_>, rusqlite::Error>>()?;
+    let groups: Vec<Group> = groups_iter.collect::<Result<Vec<_>, Error>>()?;
     println!("DEBUG DB: Загружено групп: {} шт.", groups.len());
     Ok(groups)
 }
-
-
 pub fn get_lessons_for_course_and_group(conn: &Connection, course_id: i32, group_id: i32) -> Result<Vec<LessonWithAssignments>> {
     println!("DEBUG DB: Загрузка уроков для курса {} и группы {}", course_id, group_id);
 
@@ -384,7 +380,7 @@ pub fn get_lessons_for_course_and_group(conn: &Connection, course_id: i32, group
 
     let mut lessons_map: HashMap<i32, LessonWithAssignments> = lessons_iter
         .map(|res| res.map(|lesson| (lesson.id, lesson)))
-        .collect::<Result<HashMap<i32, LessonWithAssignments>, rusqlite::Error>>()?;
+        .collect::<Result<HashMap<i32, LessonWithAssignments>, Error>>()?;
 
     println!("DEBUG DB: Загружено уроков: {}", lessons_map.len());
 
@@ -414,7 +410,7 @@ pub fn get_lessons_for_course_and_group(conn: &Connection, course_id: i32, group
     })?;
 
     println!("DEBUG DB: Загрузка заданий...");
-    let assignments: Vec<Assignment> = assignments_iter.collect::<Result<Vec<_>, rusqlite::Error>>()?;
+    let assignments: Vec<Assignment> = assignments_iter.collect::<Result<Vec<_>, Error>>()?;
     println!("DEBUG DB: Загружено заданий: {} шт.", assignments.len());
 
     // 3. Распределяем задания по соответствующим урокам
@@ -558,12 +554,12 @@ pub fn get_student_group_by_user_id(conn: &Connection, user_id: i32) -> Result<O
             G.teacher_id,
             C.title AS course_name,
             U.Name AS teacher_name,
-            (SELECT COUNT(*) FROM GroupStudent GS_inner WHERE GS_inner.group_id = G.id) AS student_count
+            G.student_count -- ИСПРАВЛЕНО: Теперь берем из столбца G.student_count
         FROM \"Group\" G
         JOIN GroupStudent GS ON G.id = GS.group_id
         JOIN Users U ON G.teacher_id = U.ID
         JOIN Course C ON G.course_id = C.ID
-        WHERE GS.student_id = ?1 -- ИСПРАВЛЕНО ЗДЕСЬ: GS.student_id
+        WHERE GS.student_id = ?1
     ")?;
 
     let group_opt = stmt.query_row(params![user_id], |row| {
@@ -585,7 +581,6 @@ pub fn get_student_group_by_user_id(conn: &Connection, user_id: i32) -> Result<O
     }
     Ok(group_opt)
 }
-
 pub fn get_students_without_group(conn: &Connection) -> Result<Vec<UserInfo>> {
     println!("DEBUG DB: Загрузка студентов без группы...");
     let mut stmt = conn.prepare("
@@ -615,7 +610,7 @@ pub fn get_students_without_group(conn: &Connection) -> Result<Vec<UserInfo>> {
         })
     })?;
 
-    let students: Vec<UserInfo> = students_iter.collect::<Result<Vec<_>, rusqlite::Error>>()?;
+    let students: Vec<UserInfo> = students_iter.collect::<Result<Vec<_>, Error>>()?;
     println!("DEBUG DB: Загружено студентов без группы: {} шт.", students.len());
     Ok(students)
 }
@@ -640,25 +635,69 @@ pub fn delete_group(conn: &Connection, id: i32) -> Result<()> {
     Ok(())
 }
 
-pub fn add_student_to_group(conn: &Connection, student_id: i32, group_id: i32) -> Result<()> {
+pub fn add_student_to_group(conn: &mut Connection, student_id: i32, group_id: i32) -> Result<()> {
     println!("DEBUG DB: Добавление студента ID: {} в группу ID: {}", student_id, group_id);
-    conn.execute(
-        "INSERT INTO GroupStudent (group_id, student_id) VALUES (?1, ?2)",
-        params![group_id, student_id],
+
+    let tx = conn.transaction()?;
+
+    // 1. Добавляем студента в GroupStudent
+    tx.execute(
+        "INSERT INTO GroupStudent (student_id, group_id) VALUES (?1, ?2)",
+        params![student_id, group_id],
     )?;
+
+    // 2. Пересчитываем количество студентов в группе
+    let new_student_count: i32 = tx.query_row(
+        "SELECT COUNT(*) FROM GroupStudent WHERE group_id = ?1",
+        params![group_id],
+        |row| row.get(0),
+    )?;
+
+    // 3. Обновляем student_count в таблице "Group"
+    // ИСПРАВЛЕНО: Добавлены кавычки вокруг "Group"
+    tx.execute(
+        "UPDATE \"Group\" SET student_count = ?1 WHERE id = ?2",
+        params![new_student_count, group_id],
+    )?;
+
+    tx.commit()?;
+
+    println!("DEBUG DB: student_count для группы ID {} обновлен до {}", group_id, new_student_count);
     Ok(())
 }
-pub fn remove_student_from_group(conn: &Connection, student_id: i32, group_id: i32) -> Result<()> {
+
+pub fn remove_student_from_group(conn: &mut Connection, student_id: i32, group_id: i32) -> Result<()> {
     println!("DEBUG DB: Удаление студента ID: {} из группы ID: {}", student_id, group_id);
 
-    // SQL-запрос изменился, чтобы использовать переданный student_id
-    conn.execute(
+    // Начало транзакции для атомарности операций
+    let tx = conn.transaction()?;
+
+    // 1. Удаляем студента из GroupStudent
+    tx.execute(
         "DELETE FROM GroupStudent WHERE student_id = ?1 AND group_id = ?2",
-        params![student_id, group_id], // Используем переданные ID
+        params![student_id, group_id],
     )?;
 
+    // 2. Пересчитываем количество студентов в группе
+    let new_student_count: i32 = tx.query_row(
+        "SELECT COUNT(*) FROM GroupStudent WHERE group_id = ?1",
+        params![group_id],
+        |row| row.get(0),
+    )?;
+    // 3. Обновляем student_count в таблице "Group"
+    // ИСПРАВЛЕНО: Добавлены кавычки вокруг "Group"
+    tx.execute(
+        "UPDATE \"Group\" SET student_count = ?1 WHERE id = ?2",
+        params![new_student_count, group_id],
+    )?;
+
+    // Коммитим транзакцию
+    tx.commit()?;
+
+    println!("DEBUG DB: student_count для группы ID {} обновлен до {}", group_id, new_student_count);
     Ok(())
 }
+
 
 pub fn get_students_in_group(conn: &Connection, group_id: i32) -> Result<Vec<UserInfo>> {
     println!("DEBUG DB: Загрузка студентов для group_id: {}", group_id);
@@ -689,7 +728,7 @@ pub fn get_students_in_group(conn: &Connection, group_id: i32) -> Result<Vec<Use
         })
     })?;
 
-    let students: Vec<UserInfo> = students_iter.collect::<Result<Vec<_>, rusqlite::Error>>()?;
+    let students: Vec<UserInfo> = students_iter.collect::<Result<Vec<_>, Error>>()?;
     println!("DEBUG DB: Загружено студентов в группе: {} шт.", students.len());
     Ok(students)
 }
@@ -698,7 +737,7 @@ pub fn get_user_id_by_email(conn: &Connection, email: &str) -> Option<i32> {
     let mut rows = stmt.query([email]).ok()?;
     rows.next().ok().flatten().map(|row| row.get(0).ok()).flatten()
 }
-pub fn get_children_for_parent(conn: &Connection, parent_email: &str) -> Result<Vec<UserInfo>, rusqlite::Error> {
+pub fn get_children_for_parent(conn: &Connection, parent_email: &str) -> Result<Vec<UserInfo>, Error> {
     let mut stmt = conn.prepare("
         SELECT
             U.ID, U.Name, U.Email, U.Birthday, U.Type, U.AvatarData,
@@ -729,7 +768,7 @@ pub fn get_children_for_parent(conn: &Connection, parent_email: &str) -> Result<
     children_iter.collect()
 }
 
-pub fn delete_child_for_parent(conn: &Connection, parent_email: &str, child_email: &str) -> Result<(), rusqlite::Error> {
+pub fn delete_child_for_parent(conn: &Connection, parent_email: &str, child_email: &str) -> Result<(), Error> {
     conn.execute(
         "DELETE FROM ParentStudent
          WHERE parent_id = (SELECT ID FROM Users WHERE Email = ?1)
@@ -738,7 +777,7 @@ pub fn delete_child_for_parent(conn: &Connection, parent_email: &str, child_emai
     )?;
     Ok(())
 }
-pub fn get_unassigned_children(conn: &Connection) -> Result<Vec<UserInfo>, rusqlite::Error> {
+pub fn get_unassigned_children(conn: &Connection) -> Result<Vec<UserInfo>, Error> {
     let mut stmt = conn.prepare("
         SELECT
             U.ID, U.Name, U.Email, U.Birthday, U.Type, U.AvatarData,
@@ -770,7 +809,7 @@ pub fn get_unassigned_children(conn: &Connection) -> Result<Vec<UserInfo>, rusql
     Ok(children)
 }
 
-pub fn add_child_to_parent(conn: &Connection, parent_email: &str, child_email: &str) -> Result<(), rusqlite::Error> {
+pub fn add_child_to_parent(conn: &Connection, parent_email: &str, child_email: &str) -> Result<(), Error> {
     let parent_id: i32 = conn.query_row("SELECT ID FROM Users WHERE Email = ?", [parent_email], |row| row.get(0))?;
     let child_id: i32 = conn.query_row("SELECT ID FROM Users WHERE Email = ?", [child_email], |row| row.get(0))?;
     conn.execute("INSERT INTO ParentStudent (parent_id, student_id) VALUES (?, ?)", [parent_id, child_id])?;
@@ -923,7 +962,7 @@ pub fn get_past_sessions_for_group(conn: &Connection, group_id: i32) -> Result<V
         })
     })?;
 
-    let sessions: Vec<PastSession> = sessions_iter.collect::<Result<Vec<_>, rusqlite::Error>>()?;
+    let sessions: Vec<PastSession> = sessions_iter.collect::<Result<Vec<_>, Error>>()?;
     Ok(sessions)
 }
 pub fn add_past_session(conn: &Connection, group_id: i32, lesson_id: i32) -> Result<()> {
@@ -942,4 +981,188 @@ pub fn add_past_session(conn: &Connection, group_id: i32, lesson_id: i32) -> Res
             Err(e)
         }
     }
+}
+pub fn get_all_payments_with_details(conn: &Connection) -> Result<Vec<Payment>> {
+    let mut stmt = conn.prepare("
+        SELECT
+            P.id,
+            P.student_id,
+            P.date,
+            P.amount,
+            P.type,
+            P.course_id,
+            P.group_id,
+            U.Name AS student_name,
+            C.title AS course_title,
+            G.name AS group_name
+        FROM Payment P
+        JOIN Users U ON P.student_id = U.ID
+        JOIN Course C ON P.course_id = C.ID
+        JOIN \"Group\" G ON P.group_id = G.id
+        ORDER BY P.date DESC
+    ")?;
+
+    let payments_iter = stmt.query_map(params![], |row| {
+        Ok(Payment {
+            id: row.get("id")?,
+            student_id: row.get("student_id")?,
+            date: row.get("date")?,
+            amount: row.get("amount")?,
+            payment_type: row.get("type")?,
+            course_id: row.get("course_id")?,
+            group_id: row.get("group_id")?,
+            student_name: row.get("student_name")?,
+            course_title: row.get("course_title")?,
+            group_name: row.get("group_name")?,
+        })
+    })?;
+
+    payments_iter.collect::<Result<Vec<_>, Error>>()
+}
+
+// получить студентов, которые не состоят ни в одной группе
+pub fn get_students_not_in_any_group(conn: &Connection) -> Result<Vec<UserInfo>> {
+    let mut stmt = conn.prepare("
+        SELECT
+            U.ID, U.Name, U.Email, U.Birthday, U.Type, U.AvatarData
+        FROM Users U
+        WHERE U.Type = 'student' AND U.ID NOT IN (SELECT student_id FROM GroupStudent)
+        ORDER BY U.Name
+    ")?;
+
+    let users_iter = stmt.query_map(params![], |row| {
+        Ok(UserInfo {
+            id: row.get("ID")?,
+            name: row.get("Name")?,
+            email: row.get("Email")?,
+            birthday: row.get("Birthday")?,
+            user_type: row.get("Type")?,
+            avatar_data: row.get("AvatarData").ok(),
+            group_id: None,
+            child_count: None,
+        })
+    })?;
+
+    users_iter.collect::<Result<Vec<_>, Error>>()
+}
+
+// получить курсы со свободными местами
+pub fn get_courses_with_available_seats(conn: &Connection) -> Result<Vec<Course>> {
+    let mut stmt = conn.prepare("
+        SELECT
+            ID,
+            title,
+            description,
+            level,
+            total_seats,
+            seats, -- <--- Просто выбираем существующий столбец seats
+            price
+        FROM Course
+        ORDER BY title
+    ")?;
+
+    let courses_iter = stmt.query_map(params![], |row| {
+        Ok(Course {
+            id: row.get("ID")?,
+            title: row.get("title")?,
+            description: row.get("description")?,
+            level: row.get("level")?,
+            total_seats: row.get("total_seats")?,
+            seats: row.get("seats")?, // <--- Получаем значение из БД
+            price: row.get("price")?,
+            lesson_count: 0,
+        })
+    })?;
+    courses_iter.collect::<Result<Vec<_>>>()
+}
+
+// получить группы по course_id
+pub fn get_groups_by_course_id(conn: &Connection, course_id: i32) -> Result<Vec<Group>> {
+    let mut stmt = conn.prepare("
+        SELECT
+            G.id,
+            G.course_id,
+            G.teacher_id,
+            G.name,
+            G.student_count,
+            U.Name AS teacher_name -- Включаем имя учителя
+        FROM \"Group\" G
+        LEFT JOIN Users U ON G.teacher_id = U.ID
+        WHERE G.course_id = ?1
+        ORDER BY G.name
+    ")?;
+
+    let groups_iter = stmt.query_map(params![course_id], |row| {
+        Ok(Group {
+            id: row.get("id")?,
+            course_id: row.get("course_id")?,
+            teacher_id: row.get("teacher_id")?,
+            name: row.get("name")?,
+            student_count: row.get("student_count")?,
+            course_name: None, // Не получаем здесь название курса
+            teacher_name: row.get("teacher_name").ok(),
+        })
+    })?;
+    groups_iter.collect::<Result<Vec<_>>>()
+}
+
+// добавить платеж
+pub fn add_payment(
+    conn: &Connection,
+    student_id: i32,
+    date: &str,
+    amount: f64,
+    payment_type: &str,
+    course_id: i32,
+    group_id: i32,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO Payment (student_id, date, amount, type, course_id, group_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![student_id, date, amount, payment_type, course_id, group_id],
+    )?;
+    Ok(())
+}
+pub fn delete_payment(conn: &Connection, course_id: i32) -> Result<()> {
+    let mut stmt = conn.prepare("DELETE FROM Payment WHERE id = ?")?;
+    stmt.execute([course_id])?;
+    Ok(())
+}
+pub fn load_payments(conn: &Connection) -> Result<Vec<Payment>> {
+    let mut stmt = conn.prepare("
+        SELECT 
+            p.id,
+            p.student_id,
+            u.name AS student_name,
+            p.course_id,
+            c.title AS course_title,
+            p.group_id,
+            g.name AS group_name,
+            p.date,
+            p.amount,
+            p.type
+        FROM Payment p
+        JOIN Users u ON p.student_id = u.id
+        JOIN Course c ON p.course_id = c.id
+        JOIN \"Group\" g ON p.group_id = g.id
+    ")?;
+
+
+    let payments = stmt.query_map([], |row| {
+        Ok(Payment {
+            id: row.get(0)?,
+            student_id: row.get(1)?,
+            student_name: row.get(2)?,
+            course_id: row.get(3)?,
+            course_title: row.get(4)?,
+            group_id: row.get(5)?,
+            group_name: row.get(6)?,
+            date: row.get(7)?,
+            amount: row.get(8)?,
+            payment_type: row.get(9)?,
+        })
+    })?
+        .filter_map(Result::ok)
+        .collect();
+
+    Ok(payments)
 }

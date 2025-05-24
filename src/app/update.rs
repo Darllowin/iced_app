@@ -43,7 +43,7 @@ impl App {
                             avatar_data: user_info_data.avatar_data,
                             child_count: user_info_data.child_count,
                         });
-
+                        self.error_message = "".to_string();
                         self.current_screen = Screen::Profile;
 
                         if let Some(user) = &self.current_user {
@@ -198,9 +198,7 @@ impl App {
                 let full_name = format!("{} {} {}", self.user_surname, self.user_name, self.user_patronymic);
                 let password_hash = hash_password(&self.user_password);
 
-                // Здесь регистрация пользователя должна быть асинхронной операцией
-                // Однако, чтобы не усложнять, пока оставим синхронно, но вернем Task::none()
-                // В идеале, эта часть тоже должна быть Task::perform
+
                 if let Err(_) = db::register_user(
                     &conn,
                     &full_name,
@@ -212,15 +210,16 @@ impl App {
                 } else {
                     self.register_error = None;
                     self.registration_success = true;
-                    self.type_user = "student".to_string();
                     self.user_email = email.to_string();
                     self.logged_in_user = full_name;
-                    // Эти операции тоже могут быть асинхронными
+                    self.error_message = "".to_string();
                     db::update_user_avatar(&conn, &self.user_email, fs::read(DEFAULT_AVATAR).unwrap().as_slice()).unwrap();
                     self.user_avatar_data = Some(fs::read(DEFAULT_AVATAR).unwrap());
-                    self.current_screen = Screen::Profile;
                 }
-                Task::none() // Возвращаем Task::none()
+                Task::perform(
+                    db::authenticate_and_get_user_data(self.user_email.clone(), password_hash),
+                    Message::UserLoggedIn
+                )
             }
             Message::GoToProfile => {
                 self.current_screen = Screen::Profile;
@@ -312,7 +311,6 @@ impl App {
                     Message::AvatarChosen // Отображаем результат выполнения этой задачи
                 )
             },
-
             Message::AvatarChosen(result) => {
                 match result {
                     Ok(new_avatar_data) => {
@@ -347,19 +345,33 @@ impl App {
                 self.new_course_description = desc;
                 Task::none()
             }
-            Message::LoadStudentGroupInfo => Task::perform(
-                async move { // 'move' здесь захватывает `current_user_for_task_clone`
-                    let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
-                    // Теперь `current_user_for_task_clone` доступен, так как он был захвачен `move` замыканием
-                    if let Some(user_id) = current_user_for_task_clone.as_ref().map(|u| u.id) { // <-- Используем правильную клонированную переменную
-                        db::get_student_group_by_user_id(&conn, user_id)
-                            .map_err(|e| e.to_string())
-                    } else {
-                        Ok(None)
-                    }
-                },
-                Message::StudentGroupInfoLoaded,
-            ),
+            Message::NewCourseTotalSeatsChanged(total_seats) => {
+                self.new_course_total_seats = total_seats;
+                Task::none()
+            }
+            Message::NewCourseSeatsChanged(seats) => {
+                self.new_course_seats = seats;
+                Task::none()
+            }
+            Message::NewCoursePriceChanged(price) => {
+                self.new_course_price = price;
+                Task::none()
+            }
+            Message::LoadStudentGroupInfo => {
+                Task::perform(
+                    async move { // 'move' здесь захватывает `current_user_for_task_clone`
+                        let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
+                        // Теперь `current_user_for_task_clone` доступен, так как он был захвачен `move` замыканием
+                        if let Some(user_id) = current_user_for_task_clone.as_ref().map(|u| u.id) { // <-- Используем правильную клонированную переменную
+                            db::get_student_group_by_user_id(&conn, user_id)
+                                .map_err(|e| e.to_string())
+                        } else {
+                            Ok(None)
+                        }
+                    },
+                    Message::StudentGroupInfoLoaded,
+                )
+            }
             Message::StudentGroupInfoLoaded(result) => {
                 match result {
                     Ok(group_opt) => {
@@ -378,7 +390,6 @@ impl App {
                 }
                 Task::none()
             },
-
             Message::ShowGroupStudents(group_id) => {
                 self.show_group_students_modal = true;
                 // Находим название группы, чтобы отобразить его в модальном окне
@@ -439,7 +450,6 @@ impl App {
                     Message::AllCoursesLoaded // <-- Когда задача завершится, отправь это сообщение
                 )
             }
-            // --- Обработка результатов загрузки данных ---
             Message::AllCoursesLoaded(result) => {
                 match result {
                     Ok(courses) => {
@@ -465,28 +475,26 @@ impl App {
                     self.course_error_message = Some("Описание курса не может быть пустым.".to_string());
                     return Task::none();
                 }
-                if self.new_course_teacher_id.is_none() {
-                    self.course_error_message = Some("Необходимо выбрать преподавателя.".to_string());
+                if self.new_course_seats.is_negative() || self.new_course_seats == 0 {
+                    self.course_error_message = Some("Недопустимое количество мест.".to_string());
                     return Task::none();
                 }
-                // self.new_course_level всегда будет Some(Level) из-за PickList и инициализации в `new`
-                // но для безопасности и единообразия с другими Optional полями используем unwrap_or_default()
-
                 // Очищаем предыдущие ошибки, если они были
                 self.course_error_message = None;
 
                 let new_course_title_clone = self.new_course_title.clone();
                 let new_course_description_clone = self.new_course_description.clone();
-                let new_course_teacher_id = self.new_course_teacher_id.unwrap_or(0); // Безопасно, т.к. проверили is_none()
-
+                let new_course_seats_clone = self.new_course_seats.clone();
+                let new_course_total_seats = self.edit_course_total_seats;
+                let new_course_price_clone = self.new_course_price.clone();
                 let new_course_level_string = self.new_course_level.to_string(); // Преобразуем Level в String для БД
 
                 // Очищаем поля формы после успешной проверки, но до выполнения Task
                 self.new_course_title.clear();
                 self.new_course_description.clear();
-                self.new_course_teacher_id = None;
                 self.new_course_level = Level::default(); // Сброс к дефолту. Используем Level::default()
-                // или Some(Level::Beginner)
+                self.new_course_seats = 0;
+                self.new_course_total_seats = 0;
 
                 self.show_add_course_modal = false; // Закрываем модалку
 
@@ -496,7 +504,7 @@ impl App {
                             let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
                             // Вызов db::add_course скорректирован согласно его сигнатуре (Option<i32>, Option<&str>)
-                            db::add_course(&conn, &new_course_title_clone, &new_course_description_clone, Some(new_course_teacher_id), Some(&new_course_level_string))
+                            db::add_course(&conn, &new_course_title_clone, &new_course_description_clone, Some(&new_course_level_string), new_course_seats_clone, new_course_price_clone, new_course_total_seats)
                                 .map_err(|e| format!("Ошибка добавления курса: {}", e))
                         }).await
                             .map_err(|join_err| format!("Ошибка выполнения задачи: {:?}", join_err))?
@@ -509,18 +517,11 @@ impl App {
                     }
                 )
             }
-
             Message::DeleteCourse(course_id) => {
                 // Эта операция должна быть асинхронной
                 let conn = Connection::open(PATH_TO_DB).unwrap();
                 db::delete_course(&conn, course_id).unwrap();
                 Task::none() // Возвращаем Task::none()
-            }
-            Message::NewCourseInstructorChanged(selected_user_info) => {
-                // Сохраняем UserInfo для отображения, и ID для сохранения
-                self.new_course_teacher = selected_user_info.clone();
-                self.new_course_teacher_id = selected_user_info.map(|u| u.id); // Получаем ID
-                Task::none()
             }
             Message::NewCourseLevelChanged(level) => {
                 self.new_course_level = level;
@@ -528,12 +529,14 @@ impl App {
             }
             Message::StartEditingCourse(course) => {
                 self.edit_course_title = course.title.clone();
-                self.edit_course_description = course.description.clone();
-                self.edit_course_teacher_id = course.instructor_id;
+                self.edit_course_description = course.description.clone().expect("REASON");
 
                 self.edit_course_level = course.level.clone()
                     .and_then(|level_str| Level::from_str(&level_str).ok())
                     .unwrap_or(Level::Beginner);
+                self.edit_course_total_seats = course.total_seats.clone().expect("REASON");
+                self.edit_course_seats = course.seats.clone().expect("REASON");
+                self.edit_course_price = course.price.clone().expect("REASON");
                 self.editing_course = Some(course);
                 self.show_add_course_modal = true;
                 Task::none()
@@ -546,39 +549,70 @@ impl App {
                 self.edit_course_description = desc;
                 Task::none()
             }
-            Message::EditCourseInstructorChanged(selected_user_info) => {
-                // Сохраняем UserInfo для отображения, и ID для сохранения
-                self.edit_course_teacher = selected_user_info.clone();
-                self.edit_course_teacher_id = selected_user_info.map(|u| u.id); // Получаем ID
-                Task::none()
-            }
             Message::EditCourseLevelChanged(level) => {
                 self.edit_course_level = level;
+                Task::none()
+            }
+            Message::EditCourseTotalSeatsChanged(total_seats) => {
+                self.edit_course_total_seats = total_seats;
+                Task::none()
+            }
+            Message::EditCourseSeatsChanged(seats) => {
+                self.edit_course_seats = seats;
+                Task::none()
+            }
+            Message::EditCoursePriceChanged(price) => {
+                self.edit_course_price = price;
                 Task::none()
             }
             Message::SubmitEditedCourse => {
                 // Эта операция должна быть асинхронной
                 if let Some(original_course) = &self.editing_course {
+
+                    if self.edit_course_title.is_empty() {
+                        self.course_error_message = Some("Название курса не может быть пустым.".to_string());
+                        return Task::none();
+                    }
+                    if self.edit_course_description.is_empty() {
+                        self.course_error_message = Some("Описание курса не может быть пустым.".to_string());
+                        return Task::none();
+                    }
+                    if self.edit_course_seats.is_negative() {
+                        self.course_error_message = Some("Недопустимое количество мест.".to_string());
+                        return Task::none();
+                    }
+                    if self.edit_course_seats == 0 {
+                        self.course_error_message = Some("Недопустимое количество мест.".to_string());
+                        return Task::none();
+                    }
+                    if self.edit_course_price == 0.0 {
+                        self.course_error_message = Some("Недопустимая цена.".to_string());
+                        return Task::none();
+                    }
+                    if self.edit_course_price.is_sign_negative() {
+                        self.course_error_message = Some("Недопустимая цена.".to_string());
+                        return Task::none();
+                    }
+                    if self.edit_course_total_seats == 0 {
+                        self.course_error_message = Some("Недопустимое количество мест.".to_string());
+                        return Task::none();
+                    }
+                    if self.edit_course_total_seats.is_negative() {
+                        self.course_error_message = Some("Недопустимая цена.".to_string());
+                        return Task::none();
+                    }
+
                     let conn = Connection::open(PATH_TO_DB).unwrap();
-
-                    // Получаем имя преподавателя для instructor_name, если оно нужно
-                    // Если App.edit_course_teacher_id установлен, найдем соответствующего UserInfo
-                    let instructor_name_for_course = self.edit_course_teacher_id.and_then(|id| {
-                        // Поиск UserInfo в app.all_users
-                        self.all_users.iter()
-                            .find(|u| u.id == id)
-                            .map(|u| u.name.clone())
-                    });
-
 
                     let updated_course = Course {
                         id: original_course.id,
                         title: self.edit_course_title.clone(),
-                        description: self.edit_course_description.clone(),
-                        instructor_id: self.edit_course_teacher_id, // <--- ИСПОЛЬЗУЕМ instructor_id
-                        instructor_name: instructor_name_for_course, // <--- ИСПОЛЬЗУЕМ instructor_name
+                        description: Some(self.edit_course_description.clone()),
                         level: Some(self.edit_course_level.to_string()),
-                        lesson_count: original_course.lesson_count, // Сохраняем оригинальное количество занятий
+                        lesson_count: original_course.lesson_count,
+                        total_seats: Some(self.edit_course_total_seats),
+                        seats: Some(self.edit_course_seats),
+                        price: Some(self.edit_course_price),
                     };
 
                     if db::update_course(&conn, &updated_course).is_ok() {
@@ -590,13 +624,15 @@ impl App {
                         self.edit_course_teacher_id = None; // <--- Очищаем ID
                         // self.edit_course_instructor_name = None; // Если такое поле есть в App и вы его очищаете
                         self.edit_course_level = Level::Beginner;
+                        self.edit_course_total_seats = 0;
+                        self.edit_course_seats = 0;
+                        self.edit_course_price = 0.0;
                     } else {
                         self.error_message = "Ошибка сохранения курса.".to_string();
                     }
                 }
                 Task::none() // Возвращаем Task::none()
             }
-
             Message::CancelEditingCourse => {
                 self.show_add_course_modal = false;
                 self.editing_course = None;
@@ -615,7 +651,6 @@ impl App {
                 self.show_edit_user_modal = true;
                 Task::none()
             }
-
             Message::CancelEditingUser => {
                 self.editing_user = None;
                 self.show_edit_user_modal = false;
@@ -625,22 +660,18 @@ impl App {
                 self.edit_user_type.clear();
                 Task::none()
             }
-
             Message::EditUserNameChanged(value) => {
                 self.edit_user_name = value;
                 Task::none()
             }
-
             Message::EditUserEmailChanged(value) => {
                 self.edit_user_email = value;
                 Task::none()
             }
-
             Message::EditUserBirthdayChanged(value) => {
                 self.edit_user_birthday = value;
                 Task::none()
             }
-
             Message::EditUserTypeChanged(value) => {
                 self.edit_user_type = value;
                 Task::none()
@@ -715,7 +746,6 @@ impl App {
                 }
                 Task::none() // Возвращаем Task::none()
             }
-
             Message::DeleteUser(email) => {
                 println!("DEBUG: Попытка удалить пользователя с email: {}", email);
                 // Клонируем путь к БД для использования в асинхронной задаче
@@ -738,7 +768,6 @@ impl App {
                 )
                     .into() // Преобразуем Task в Command
             },
-
             Message::UserDeleted(result) => {
                 match result {
                     Ok(email) => {
@@ -846,7 +875,6 @@ impl App {
                 self.new_group_teacher = selected_teacher.map(|u| u.id); // Сохраняем только ID
                 Task::none()
             }
-
             Message::EditGroupNameChanged(name) => {
                 self.edit_group_name = name;
                 Task::none()
@@ -859,7 +887,6 @@ impl App {
                 self.edit_group_teacher = selected_teacher.map(|u| u.id); // Сохраняем только ID
                 Task::none()
             }
-
             Message::StartEditingGroup(group) => {
                 self.editing_group = Some(group.clone());
                 self.edit_group_name = group.name;
@@ -991,7 +1018,6 @@ impl App {
                     }
                 )
             }
-
             Message::CourseLessonsLoaded(result) => {
                 match result {
                     Ok(lessons) => {
@@ -1086,7 +1112,6 @@ impl App {
                 }
                 Task::none()
             }
-
             Message::StudentsWithoutGroupLoaded(result) => {
                 match result {
                     Ok(students) => {
@@ -1100,51 +1125,26 @@ impl App {
                 }
                 Task::none()
             }
+            Message::AddStudentToGroup(student_id, group_id) => {
+                // ... ваш существующий код для вызова db::add_student_to_group ...
+                // и обработки результата.
+                // Важно, чтобы db_conn был клонирован для асинхронной задачи.
+                let teacher_id = self.current_user.as_ref().map(|u| u.id).unwrap_or(0); // Получаем ID текущего учителя
 
-            Message::AddStudentToGroup(student_id_from_msg, group_id_from_msg) => {
-                // Мы используем group_id_from_msg, переданный из UI.
-                // Поэтому проверять self.current_manage_students_group_id здесь не обязательно.
-                // Его можно использовать для других целей, но не для определения group_id для операции.
-                let group_id = group_id_from_msg; // Просто используем переданный group_id
-
-                let student_id = student_id_from_msg;
-
-                if student_id == 0 { // Проверка, что студент был выбран (если ID 0 означает "ничего не выбрано")
-                    self.group_error_message = Some("Пожалуйста, выберите студента для добавления.".to_string());
-                    return Task::none(); // Возвращаем пустую команду, ошибка отобразится
-                }
-
-                // Очищаем выбранного студента в PickList после попытки добавления
-                self.selected_student_to_add = None;
-                self.group_error_message = None; // Очищаем предыдущие ошибки
-
-                println!("DEBUG: Попытка добавить студента ID: {} в группу ID: {}", student_id, group_id);
-
-                // Запускаем асинхронную задачу для добавления студента в БД
                 Task::perform(
                     async move {
-                        spawn_blocking(move || {
-                            let conn = Connection::open(PATH_TO_DB) // Используем клонированный путь к БД
-                                .map_err(|e| format!("Не удалось открыть БД для добавления студента: {}", e))?;
-                            db::add_student_to_group(&conn, student_id, group_id) // Используем переданные ID
-                                .map_err(|e| format!("Ошибка добавления студента в группу: {}", e))
-                        })
-                            .await
-                            .unwrap_or_else(|join_err| Err(format!("Ошибка выполнения задачи добавления студента: {:?}", join_err)))
+                        let mut conn = Connection::open(PATH_TO_DB).unwrap();
+                        db::add_student_to_group(&mut conn, student_id, group_id)
+                            .map_err(|e| format!("Ошибка добавления студента: {}", e))
                     },
-                    move |result| { // Это замыкание, которое обрабатывает результат асинхронной операции
-                        match result {
-                            Ok(_) => {
-                                println!("DEBUG: Студент успешно добавлен. Перезагружаем списки.");
-                                // После успешного добавления перезагружаем оба списка студентов в модалке
-                                Message::OpenManageStudentsModal(group_id) // Перезапускаем открытие модалки
-                            },
-                            Err(e) => {
-                                eprintln!("ERROR: Не удалось добавить студента: {}", e);
-                                Message::Er(e) // Теперь это правильное сообщение об ошибке
-                            }
+                    move |result| {
+                        if let Err(e) = result {
+                            Message::ErrorOccurred(e) // Или ваше сообщение об ошибке
+                        } else {
+                            println!("DEBUG: Студент успешно добавлен/удален. Запускаем перезагрузку...");
+                            Message::StudentsAndGroupsReloaded(group_id, 0) // Отправляем новое сообщение
                         }
-                    }
+                    },
                 )
             }
             Message::SelectedStudentToAddChanged(student) => { // <--- 'student' теперь UserInfo напрямую
@@ -1160,13 +1160,14 @@ impl App {
                 // Поскольку i32 является Copy, это создаст независимую копию.
                 let group_id_for_async_task = group_id; // Для асинхронной задачи db
                 let group_id_for_result_closure = group_id; // Для замыкания |result|
+                let teacher_id = self.current_user.as_ref().map(|u| u.id).unwrap_or(0);
 
                 Task::perform(
                     async move { // 'move' здесь гарантирует, что student_id и group_id_for_async_task перемещаются в этот async блок
                         spawn_blocking(move || { // 'move' здесь гарантирует, что student_id и group_id_for_async_task перемещаются в этот blocking блок
-                            let conn = Connection::open(PATH_TO_DB)
+                            let mut conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД для удаления студента: {}", e))?;
-                            db::remove_student_from_group(&conn, student_id, group_id_for_async_task) // Используем переданные значения
+                            db::remove_student_from_group(&mut conn, student_id, group_id_for_async_task) // Используем переданные значения
                                 .map_err(|e| format!("Ошибка удаления студента из группы: {}", e))
                         })
                             .await
@@ -1178,7 +1179,9 @@ impl App {
                             Ok(_) => {
                                 println!("DEBUG: Студент успешно удален. Перезагружаем списки.");
                                 // Используем перемещенную копию group_id
-                                Message::OpenManageStudentsModal(group_id_for_result_closure)
+                                //Message::OpenManageStudentsModal(group_id_for_result_closure)
+                                println!("DEBUG: Получено StudentsAndGroupsReloaded для group_id: {}, teacher_id: {}", group_id, teacher_id);
+                                Message::StudentsAndGroupsReloaded(group_id, 0)
                             },
                             Err(e) => {
                                 eprintln!("ERROR: Не удалось удалить студента: {}", e);
@@ -1188,6 +1191,33 @@ impl App {
                         }
                     }
                 )
+            }
+            Message::StudentsAndGroupsReloaded(group_id, teacher_id) => {
+                // 1. Перезагрузка студентов в модальном окне
+                let command1 = Task::perform(
+                    async move { // <--- ДОБАВЬТЕ `move` ЗДЕСЬ
+                        // Теперь group_id принадлежит этому асинхронному блоку
+                        let conn = Connection::open(PATH_TO_DB).map_err(|e| format!("Не удалось открыть БД: {}", e))?;
+                        db::get_students_in_group(&conn, group_id)
+                            .map(|students| (group_id, students))
+                            .map_err(|e| format!("Ошибка загрузки студентов группы: {}", e))
+                    },
+                    Message::GroupStudentsLoaded,
+                );
+
+                // 2. Перезагрузка списка всех групп учителя (для обновления student_count)
+                let command2 = Task::perform(
+                    async move {
+                        spawn_blocking(move || {
+                            let conn = Connection::open(PATH_TO_DB).map_err(|e| format!("Не удалось открыть БД: {}", e))?;
+                            db::get_all_groups(&conn) // <--- ВЫЗЫВАЕМ get_all_groups
+                                .map_err(|e| format!("Ошибка загрузки всех групп: {}", e))
+                        }).await.unwrap_or_else(|j| Err(format!("Join error: {:?}", j)))
+                    },
+                    Message::AllGroupsLoaded, // <--- ИСПОЛЬЗУЕМ AllGroupsLoaded
+                );
+
+                Task::batch(vec![command1, command2])
             }
             Message::ShowParentChildren(parent_email) => {
                 // Эта операция должна быть асинхронной
@@ -1213,8 +1243,6 @@ impl App {
                 self.show_children_modal = true;
                 Task::none() // Возвращаем Task::none()
             }
-
-
             Message::CloseParentChildrenModal => {
                 self.show_children_modal = false;
                 self.parent_children.clear();
@@ -1482,7 +1510,16 @@ impl App {
                 }
                 Task::none()
             }
-            // ... (остальные сообщения, добавленные вами ранее) ...
+            Message::GOToPayment => {
+                self.current_screen = Screen::Payment;
+                Task::perform(
+                    async {
+                        let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
+                        db::get_all_payments_with_details(&conn).map_err(|e| e.to_string())
+                    },
+                    Message::PaymentsFetched,
+                )
+            }
             Message::SelectGroupForClasses(group) => {
                 self.selected_group_for_classes = Some(group.clone());
                 self.show_teacher_assignment_modal = false;
@@ -1607,7 +1644,6 @@ impl App {
                     }
                 }
             }
-
             Message::GroupLessonsWithAssignmentsLoaded(result) => {
                 match result {
                     Ok(lessons) => {
@@ -1621,7 +1657,6 @@ impl App {
                     }
                 }
             }
-
             Message::PastSessionsLoaded(result) => {
                 match result {
                     Ok(past_sessions) => {
@@ -1986,11 +2021,11 @@ impl App {
             Message::LoadAllGroups => {
                 println!("DEBUG: Запущена асинхронная загрузка ВСЕХ групп (для администратора).");
                 Task::perform(
-                    async { // `async` без `move`, так как не захватывает внешние переменные
+                    async move {
                         spawn_blocking(move || {
                             let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД для загрузки ВСЕХ групп: {}", e))?;
-                            db::get_all_groups(&conn) // <-- Вызываем новую функцию
+                            db::get_all_groups(&conn) // <--- ВЫЗЫВАЕМ НОВУЮ ФУНКЦИЮ
                                 .map_err(|e| format!("Ошибка загрузки ВСЕХ групп из БД: {}", e))
                         })
                             .await
@@ -1998,12 +2033,27 @@ impl App {
                                 Err(format!("Ошибка выполнения блокирующей задачи загрузки ВСЕХ групп: {:?}", join_err))
                             })
                     },
-                    Message::TeacherGroupsLoaded // Используем то же сообщение для результата, но группы будут ВСЕ
+                    Message::AllGroupsLoaded // <--- ИСПОЛЬЗУЕМ НОВОЕ СООБЩЕНИЕ
                 )
+            }
+            Message::AllGroupsLoaded(result) => { // <--- НОВЫЙ ОБРАБОТЧИК
+                match result {
+                    Ok(groups) => {
+                        self.all_groups = groups; // Обновляем новое поле
+                        self.group_error_message = None; // Очищаем ошибку, если она была
+                        println!("DEBUG: AllGroupsLoaded успешно. Загружено ВСЕХ групп: {} шт.", self.all_groups.len());
+                    }
+                    Err(e) => {
+                        self.group_error_message = Some(format!("Ошибка загрузки ВСЕХ групп: {}", e));
+                        eprintln!("Ошибка загрузки ВСЕХ групп для администратора: {}", e);
+                    }
+                }
+                Task::none()
             }
             Message::TeacherGroupsLoaded(result) => {
                 match result {
                     Ok(groups) => {
+                        println!("DEBUG: TeacherGroupsLoaded успешно. Загружено групп: {}", groups.len());
                         self.teacher_groups = groups; // <-- Теперь self.teacher_groups будет содержать либо группы преподавателя, либо ВСЕ группы
                         println!("DEBUG: Группы успешно загружены: {} шт.", self.teacher_groups.len());
                     },
@@ -2051,7 +2101,6 @@ impl App {
                     Message::GroupLessonsModalLoaded // Отправляем результат в новое сообщение
                 )
             }
-
             Message::GroupLessonsModalLoaded(result) => {
                 match result {
                     Ok((lessons, past_sessions)) => {
@@ -2067,7 +2116,6 @@ impl App {
                     }
                 }
             }
-
             Message::CloseGroupLessonsModal => {
                 self.show_group_lessons_modal = false;
                 self.group_lessons_modal_lessons.clear();
@@ -2076,8 +2124,249 @@ impl App {
                 Task::none()
             }
             Message::ErrorOccurred(_) => {Task::none()}
+            Message::PaymentsFetched(Ok(payments)) => {
+                self.payments = payments;
+                Task::none()
+            }
+            Message::PaymentsFetched(Err(e)) => {
+                eprintln!("Ошибка загрузки платежей: {}", e);
+                // Тут можно показать ошибку пользователю
+                Task::none()
+            }
+            Message::ToggleAddPaymentModal => {
+                self.show_add_payment_modal = !self.show_add_payment_modal;
+                // При открытии модального окна загружаем необходимые данные
+                if self.show_add_payment_modal {
+                    self.reset_new_payment_form(); // Сбросить форму
+                    Task::batch(vec![
+                        Task::perform(
+                            async {
+                                // Используйте tokio::task::spawn_blocking для блокирующих DB-операций
+                                let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
+                                db::get_students_not_in_any_group(&conn).map_err(|e| e.to_string())
+                            },
+                            Message::StudentsWithoutGroupFetched,
+                        ),
+                        Task::perform(
+                            async {
+                                let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
+                                db::get_courses_with_available_seats(&conn).map_err(|e| e.to_string())
+                            },
+                            Message::CoursesWithSeatsFetched,
+                        ),
+                    ])
+                } else {
+                    Task::none()
+                }
+            }
+            Message::StudentsWithoutGroupFetched(Ok(students)) => {
+                self.students_without_group = students;
+                Task::none()
+            }
+            Message::StudentsWithoutGroupFetched(Err(e)) => {
+                eprintln!("Ошибка загрузки студентов без группы: {}", e);
+                Task::none()
+            }
+            Message::CoursesWithSeatsFetched(Ok(courses)) => {
+                self.courses_with_seats = courses;
+                Task::none()
+            }
+            Message::CoursesWithSeatsFetched(Err(e)) => {
+                eprintln!("Ошибка загрузки курсов со свободными местами: {}", e);
+                Task::none()
+            }
+            Message::NewPaymentFormStudentSelected(selected_student_item) => {
+                self.new_payment_student = Some(selected_student_item);
+                Task::none()
+            }
+            Message::NewPaymentFormCourseSelected(selected_course_item) => {
+                // Теперь мы получаем выбранный CoursePickListItem
+                self.new_payment_course = Some(selected_course_item.clone());
+
+                // Автоматически подтягиваем цену курса из выбранного элемента
+                if let Some(course_price_str) = selected_course_item.price_display.strip_suffix(" €") {
+                    if let Ok(price) = course_price_str.parse::<f64>() {
+                        self.new_payment_amount = Some(price);
+                    }
+                } else if selected_course_item.price_display == "Цена не указана" {
+                    self.new_payment_amount = None; // Или 0.0, в зависимости от логики
+                }
+
+                // Загружаем группы для выбранного курса, используя его ID
+                Task::perform(
+                    async move {
+                        let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
+                        db::get_groups_by_course_id(&conn, selected_course_item.id).map_err(|e| e.to_string())
+                    },
+                    Message::GroupsForCourseFetched,
+                )
+            }
+            Message::GroupsForCourseFetched(Ok(groups)) => {
+                self.groups_for_selected_course = groups;
+                Task::none()
+            }
+            Message::GroupsForCourseFetched(Err(e)) => {
+                eprintln!("Ошибка загрузки групп для курса: {}", e);
+                Task::none()
+            }
+            Message::NewPaymentFormGroupSelected(selected_group_item) => {
+                self.new_payment_group = Some(selected_group_item);
+                Task::none()
+            }
+            Message::NewPaymentFormTypeChanged(selected_type_string) => {
+                let payment_types_options = vec!["Карта".to_string(), "QR-Код".to_string()]; // Убедитесь, что это совпадает с view!
+
+                self.selected_payment_type_idx = payment_types_options.iter()
+                    .position(|s| s == &selected_type_string);
+
+                self.new_payment_type = selected_type_string;
+
+                Task::none() // Возвращаем пустую команду
+            }
+            Message::AddPaymentConfirmed => {
+                // Валидация данных перед добавлением
+                if let (
+                    Some(student),
+                    Some(course),
+                    Some(group),
+                    Some(amount)
+                ) = (
+                    &self.new_payment_student,
+                    &self.new_payment_course,
+                    &self.new_payment_group,
+                    self.new_payment_amount,
+                ) {
+                    let student_id = student.id;
+                    let course_id = course.id;
+                    let group_id = group.id;
+                    let payment_type = self.new_payment_type.clone();
+                    let current_date = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+                    Task::perform(
+                        async move {
+                            let mut conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
+
+                            // Добавление платежа
+                            db::add_payment(&conn, student_id, &current_date, amount, &payment_type, course_id, group_id)
+                                .map_err(|e| e.to_string())?;
+
+                            // Добавление студента в группу
+                            db::add_student_to_group(&mut conn, student_id, group_id)
+                                .map_err(|e| e.to_string())?;
+
+                            Ok(()) 
+                        },
+                        Message::PaymentAdded,
+                    )
+                } else {
+                    eprintln!("Не все поля для нового платежа заполнены.");
+                    Task::none()
+                }
+            }
+            Message::PaymentAdded(Ok(_)) => {
+                println!("Платеж успешно добавлен.");
+                self.show_add_payment_modal = false;
+                self.reset_new_payment_form();
+
+                // Теперь, помимо перезагрузки платежей,
+                // нужно перезагрузить данные, которые могли измениться:
+                // 1. Список студентов без групп (т.к. добавленный студент теперь в группе)
+                // 2. Списки курсов (т.к. места могли измениться)
+                // 3. Список групп (т.к. количество студентов в группе могло измениться)
+
+                Task::batch(vec![
+                    Task::perform(
+                        async {
+                            let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
+                            crate::db::get_all_payments_with_details(&conn)
+                                .map_err(|e| e.to_string())
+                        },
+                        Message::PaymentsFetched,
+                    ),
+                    Task::perform(
+                        async {
+                            let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
+                            crate::db::get_students_not_in_any_group(&conn) // Перезагружаем этот список
+                                .map_err(|e| e.to_string())
+                        },
+                        Message::StudentsWithoutGroupFetched,
+                    ),
+                    Task::perform(
+                        async {
+                            let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
+                            crate::db::get_courses_with_available_seats(&conn) // Перезагружаем курсы (места)
+                                .map_err(|e| e.to_string())
+                        },
+                        Message::CoursesWithSeatsFetched,
+                    ),
+                    Task::perform(
+                        async {
+                            let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
+                            
+                            db::get_all_groups(&conn).map_err(|e| e.to_string())
+                        },
+                        Message::GroupsFetched, // Это новое сообщение
+                    ),
+                ])
+            }
+            Message::GroupsFetched(Ok(groups)) => {
+
+                self.all_groups = groups;
+                Task::none()
+            }
+            Message::GroupsFetched(Err(e)) => {
+                eprintln!("Ошибка загрузки всех групп: {}", e);
+                Task::none()
+            }
+            Message::PaymentAdded(Err(e)) => {
+                eprintln!("Ошибка добавления платежа: {}", e);
+                Task::none()
+            }
+            Message::DeletePayment(payment_id) => {
+                let conn = Connection::open(PATH_TO_DB).unwrap();
+
+                if let Err(err) = db::delete_payment(&conn, payment_id) {
+                    eprintln!("Ошибка удаления платежа: {:?}", err);
+                    Task::none()
+                } else {
+                    // Загружаем обновлённый список платежей асинхронно
+                    Task::perform(
+                        async {
+                            let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
+                            db::load_payments(&conn).map_err(|e| e.to_string())
+                        },
+                        |result| match result {
+                            Ok(payments) => Message::PaymentsUpdated(payments),
+                            Err(e) => {
+                                eprintln!("Ошибка загрузки платежей после удаления: {}", e);
+                                Message::NoOp
+                            }
+                        },
+                    )
+                }
+            }
+            Message::PaymentsUpdated(new_list) => {
+                self.payments = new_list;
+                Task::none()
+            }
+            Message::NoOp => {
+                // Это сообщение ничего не делает.
+                // Просто возвращаем пустую команду.
+                Task::none()
+            }
         }
         
+    }
+    fn reset_new_payment_form(&mut self) {
+        self.new_payment_student = None;
+        self.new_payment_course = None;
+        self.new_payment_group = None;
+        self.new_payment_amount = None;
+        self.new_payment_type = "enrollment".to_string();
+        self.students_without_group.clear();
+        self.courses_with_seats.clear();
+        self.groups_for_selected_course.clear();
+        self.selected_payment_type_idx = Some(0);
     }
     fn clear_fields(&mut self) {
         self.user_name.clear();
