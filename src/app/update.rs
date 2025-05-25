@@ -1,13 +1,14 @@
 use std::fs;
+use std::path::{Path};
 use std::str::FromStr;
+use headless_chrome::{Browser, LaunchOptionsBuilder};
 use iced::{Task, Theme};
-use iced::widget::text_editor;
+use iced::widget::{text_editor};
 use regex::Regex;
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
-use tokio::task;
 use tokio::task::spawn_blocking;
-use crate::app::state::{Assignment, AssignmentType, Config, Course, Group, LessonWithAssignments, Level, Screen, StudentAttendance, TextInputOrEditorInput, UserInfo, CONFIG_FILE, DEFAULT_AVATAR, PATH_TO_DB};
+use crate::app::state::{Assignment, AssignmentType, Certificate, Config, Course, Group, LessonWithAssignments, Level, Screen, StudentAttendance, TextInputOrEditorInput, UserInfo, CONFIG_FILE, DEFAULT_AVATAR, PATH_TO_DB};
 use crate::db;
 use crate::screens::settings::theme_to_str;
 use super::{App, Message};
@@ -286,7 +287,7 @@ impl App {
                 // Запускаем асинхронную задачу для выбора аватара и обновления БД
                 Task::perform(
                     async move {
-                        let result: Result<Vec<u8>, String> = task::spawn_blocking(move || {
+                        let result: Result<Vec<u8>, String> = spawn_blocking(move || {
                             let Some(path_buf) = rfd::FileDialog::new().add_filter("Image", &["png", "jpg", "jpeg"]).pick_file() else {
                                 return Err("Выбор файла аватара отменен.".to_string());
                             };
@@ -754,7 +755,7 @@ impl App {
 
                 Task::perform(
                     async move {
-                        task::spawn_blocking(move || {
+                        spawn_blocking(move || {
                             let conn = Connection::open(&db_path_for_task)
                                 .map_err(|e| format!("Не удалось открыть БД для удаления: {}", e))?;
                             db::delete_user(&conn, &user_email_for_task)
@@ -875,6 +876,10 @@ impl App {
                 self.new_group_teacher = selected_teacher.map(|u| u.id); // Сохраняем только ID
                 Task::none()
             }
+            Message::NewGroupStatusChanged(status) => {
+                self.new_group_status = status;
+                Task::none()
+            }
             Message::EditGroupNameChanged(name) => {
                 self.edit_group_name = name;
                 Task::none()
@@ -887,11 +892,16 @@ impl App {
                 self.edit_group_teacher = selected_teacher.map(|u| u.id); // Сохраняем только ID
                 Task::none()
             }
+            Message::EditGroupStatusChanged(status) => {
+                self.edit_group_status = status;
+                Task::none()
+            }
             Message::StartEditingGroup(group) => {
                 self.editing_group = Some(group.clone());
                 self.edit_group_name = group.name;
                 self.edit_group_course = group.course_id; // Убедитесь, что group.course_id это Option<i32>
                 self.edit_group_teacher = group.teacher_id; // Убедитесь, что group.teacher_id это Option<i32>
+                self.edit_group_status = group.status;
                 self.show_add_group_modal = true; // Открываем модалку
                 // Вызываем загрузку списков для PickList
                 Task::batch(vec![
@@ -920,6 +930,10 @@ impl App {
                     self.group_error_message = Some("Название группы не может быть пустым.".to_string());
                     return Task::none();
                 }
+                if self.edit_group_status.is_empty() {
+                    self.group_error_message = Some("Статус группы не может быть пустым.".to_string());
+                    return Task::none();
+                }
                 if self.edit_group_course.is_none() {
                     self.group_error_message = Some("Необходимо выбрать курс для группы.".to_string());
                     return Task::none();
@@ -940,6 +954,7 @@ impl App {
                 let group_name_clone = self.edit_group_name.clone();
                 let group_course_id = self.edit_group_course.unwrap_or_default(); // ID курса (уже i32)
                 let group_teacher_id = self.edit_group_teacher.unwrap_or_default(); // ID преподавателя (уже i32)
+                let group_status_clone = self.edit_group_status.clone();
 
                 // Очищаем поля ввода и сбрасываем состояние редактирования до выполнения Task
                 self.edit_group_name.clear();
@@ -954,7 +969,7 @@ impl App {
                         spawn_blocking(move || {
                             let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
-                            db::update_group(&conn, group_id, &group_name_clone, group_course_id, group_teacher_id)
+                            db::update_group(&conn, group_id, &group_name_clone, group_course_id, group_teacher_id, &group_status_clone)
                                 .map_err(|e| format!("Ошибка обновления группы: {}", e))?;
                             Ok(()) // Возвращаем Ok(()) если все успешно
                         }).await
@@ -990,6 +1005,7 @@ impl App {
                 // ИСПРАВЛЕНО: Просто unwrap() для Option<i32>
                 let group_course_id = self.new_group_course.unwrap(); // new_group_course имеет тип Option<i32>
                 let group_teacher_id = self.new_group_teacher.unwrap(); // new_group_teacher имеет тип Option<i32>
+                let group_status_clone = self.new_group_status.clone();
 
                 // Очищаем поля ввода до выполнения Task
                 self.new_group_name.clear();
@@ -1004,7 +1020,7 @@ impl App {
                             let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
                             // Вызов функции БД теперь корректен с i32
-                            db::insert_group(&conn, &group_name_clone, group_course_id, group_teacher_id)
+                            db::insert_group(&conn, &group_name_clone, group_course_id, group_teacher_id, &group_status_clone)
                                 .map_err(|e| format!("Ошибка добавления группы: {}", e))?;
                             Ok(()) // Возвращаем Ok(()) если все успешно
                         }).await
@@ -1386,7 +1402,7 @@ impl App {
                 }
                 Task::none()
             }
-            Message::GOToPayment => {
+            Message::GoToPayment => {
                 self.current_screen = Screen::Payment;
                 Task::perform(
                     async {
@@ -1395,6 +1411,86 @@ impl App {
                     },
                     Message::PaymentsFetched,
                 )
+            }
+            Message::GoToCertificates => {
+                self.current_screen = Screen::Certificates;
+                self.error_message = "".to_string();
+                Task::perform(
+                    async move {
+                        spawn_blocking(move || {
+                            let conn = Connection::open(PATH_TO_DB)
+                                .map_err(|e| format!("Не удалось открыть БД для загрузки студентов с сертификатами: {}", e))?;
+                            // Вызываем функцию, которая возвращает Vec<UserInfo>
+                            db::get_students_with_certificates_info(&conn)
+                                .map_err(|e| format!("Не удалось загрузить студентов с сертификатами: {}", e))
+                        }).await.unwrap_or_else(|join_err| {
+                            Err(format!("Блокирующая задача (загрузка студентов с сертификатами) завершилась ошибкой: {:?}", join_err))
+                        })
+                    },
+                    Message::StudentsWithCertificatesLoaded,
+                )
+            }
+            Message::StudentsWithCertificatesLoaded(result) => {
+                match result {
+                    Ok(students) => {
+                        self.students_with_certificates = students;
+                        self.error_message = "".to_string();
+                        println!("DEBUG: Студенты с сертификатами успешно загружены: {}", self.students_with_certificates.len());
+                    }
+                    Err(e) => {
+                        self.error_message = e;
+                        eprintln!("Ошибка загрузки студентов с сертификатами: {}", self.error_message);
+                    }
+                }
+                Task::none()
+            }
+
+            // --- ОБРАБОТЧИКИ ДЛЯ МОДАЛКИ СЕРТИФИКАТОВ СТУДЕНТА ---
+            // Изменено: student_info теперь UserInfo
+            Message::OpenStudentCertificatesModal(student_info) => {
+                println!("DEBUG: Открытие модалки сертификатов для студента: {}", student_info.name);
+                self.selected_student_for_certificates = Some(student_info.clone());
+                self.show_student_certificates_modal = true;
+                self.selected_student_certs.clear();
+                self.is_loading_student_certs = true;
+
+                let student_id = student_info.id; // ID студента все еще доступен
+                Task::perform(
+                    async move {
+                        spawn_blocking(move || {
+                            let conn = Connection::open(PATH_TO_DB)
+                                .map_err(|e| format!("Не удалось открыть БД для загрузки сертификатов студента: {}", e))?;
+                            db::get_certificates_for_student(&conn, student_id)
+                                .map_err(|e| format!("Не удалось загрузить сертификаты для студента {}: {}", student_id, e))
+                        }).await.unwrap_or_else(|join_err| {
+                            Err(format!("Блокирующая задача (загрузка сертификатов студента) завершилась ошибкой: {:?}", join_err))
+                        })
+                    },
+                    Message::StudentCertificatesLoaded,
+                )
+            }
+            // Остальные обработчики для модалки остаются такими же
+            Message::StudentCertificatesLoaded(result) => {
+                self.is_loading_student_certs = false;
+                match result {
+                    Ok(certs) => {
+                        self.selected_student_certs = certs;
+                        self.error_message = "".to_string();
+                        println!("DEBUG: Сертификаты студента успешно загружены: {}", self.selected_student_certs.len());
+                    }
+                    Err(e) => {
+                        self.error_message = e;
+                        eprintln!("Ошибка загрузки сертификатов студента: {}", self.error_message);
+                    }
+                }
+                Task::none()
+            }
+            Message::CloseStudentCertificatesModal => {
+                self.show_student_certificates_modal = false;
+                self.selected_student_for_certificates = None;
+                self.selected_student_certs.clear();
+                self.error_message = "".to_string();
+                Task::none()
             }
             Message::SelectGroupForClasses(group) => {
                 self.selected_group_for_classes = Some(group.clone());
@@ -2112,7 +2208,7 @@ impl App {
                     Task::perform(
                         async {
                             let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
-                            crate::db::get_all_payments_with_details(&conn)
+                            db::get_all_payments_with_details(&conn)
                                 .map_err(|e| e.to_string())
                         },
                         Message::PaymentsFetched,
@@ -2120,7 +2216,7 @@ impl App {
                     Task::perform(
                         async {
                             let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
-                            crate::db::get_students_not_in_any_group(&conn) // Перезагружаем этот список
+                            db::get_students_not_in_any_group(&conn) // Перезагружаем этот список
                                 .map_err(|e| e.to_string())
                         },
                         Message::StudentsWithoutGroupFetched,
@@ -2128,7 +2224,7 @@ impl App {
                     Task::perform(
                         async {
                             let conn = Connection::open(PATH_TO_DB).map_err(|e| e.to_string())?;
-                            crate::db::get_courses_with_available_seats(&conn) // Перезагружаем курсы (места)
+                            db::get_courses_with_available_seats(&conn) // Перезагружаем курсы (места)
                                 .map_err(|e| e.to_string())
                         },
                         Message::CoursesWithSeatsFetched,
@@ -2314,18 +2410,36 @@ impl App {
                         println!("DEBUG: Успешно отмечена посещаемость. Проведенные занятия загружены: {}", past_sessions.len());
                         self.past_sessions_for_group = past_sessions;
 
-                        if let Some(group) = &self.selected_group_for_classes {
-                            println!("DEBUG: Отправляем SelectGroupForClasses для ID группы: {}", group.id);
-                            let group_clone = group.clone();
-                            // Повторно выбираем группу, чтобы обновить уроки/задания и посещаемость в UI, если это необходимо
+                        let group_id = self.current_group_for_attendance.as_ref().map_or(0, |g| g.id);
+                        let course_id = self.current_lesson_to_conduct.as_ref().map_or(0, |l| l.course_id); // Используем course_id из урока
+
+                        if group_id != 0 && course_id != 0 {
+                            // После успешного сохранения посещаемости, выполняем проверку завершения курса
                             Task::perform(
                                 async move {
-                                    Message::SelectGroupForClasses(group_clone)
+                                    spawn_blocking(move || {
+                                        let mut conn = Connection::open(PATH_TO_DB)
+                                            .map_err(|e| format!("Не удалось открыть БД для проверки завершения курса: {}", e))?;
+
+                                        let tx = conn.transaction() // Начинаем новую транзакцию для этой проверки
+                                            .map_err(|e| format!("Ошибка начала транзакции для проверки сертификатов: {}", e))?;
+
+                                        // Вызываем новую функцию для проверки и выдачи сертификатов
+                                        db::check_course_completion_and_issue_certificates(&tx, group_id, course_id)
+                                            .map_err(|e| format!("Ошибка проверки завершения курса и выдачи сертификатов: {}", e))?;
+
+                                        tx.commit()
+                                            .map_err(|e| format!("Ошибка фиксации транзакции для сертификатов: {}", e))?;
+
+                                        Ok(()) // Возвращаем Ok(()) если все успешно
+                                    }).await.unwrap_or_else(|join_err| {
+                                        Err(format!("Блокирующая задача (проверка сертификатов) завершилась ошибкой: {:?}", join_err))
+                                    })
                                 },
-                                |msg| msg
+                                |check_result| Message::CourseCompletionChecked(check_result), // Отправляем результат в новое сообщение
                             )
                         } else {
-                            println!("DEBUG: Нет выбранной группы, невозможно перевыбрать.");
+                            println!("DEBUG: Нет информации о группе или курсе для проверки завершения курса.");
                             Task::none()
                         }
                     }
@@ -2335,6 +2449,99 @@ impl App {
                         Task::none()
                     }
                 }
+            }
+            Message::CourseCompletionChecked(result) => {
+                match result {
+                    Ok(_) => {
+                        println!("DEBUG: Проверка завершения курса успешно выполнена. Сертификаты возможно выданы.");
+                        // Здесь можно добавить обновление UI, если необходимо
+                        // Например, перевыбрать группу, чтобы обновить UI, если это требуется.
+                        if let Some(group) = &self.selected_group_for_classes {
+                            let group_clone = group.clone();
+                            Task::perform(
+                                async move { Message::SelectGroupForClasses(group_clone) },
+                                |msg| msg
+                            )
+                        } else {
+                            Task::none()
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Ошибка при проверке завершения курса: {}", e);
+                        self.error_message = e.to_string();
+                        Task::none()
+                    }
+                }
+            }
+            Message::GenerateCertificatePdf(cert, student) => {
+                self.error_message = format!("Генерация сертификата для {}...", cert.course_title);
+                println!("DEBUG: Запущена генерация PDF для сертификата: {}", cert.id);
+
+                Task::perform(
+                    async move {
+                        spawn_blocking(move || {
+                            // Путь для временного HTML и итогового PDF
+                            let html_path = std::path::PathBuf::from("certificates/temp_certificate.html");
+                            let pdf_path = std::path::PathBuf::from("certificates/certificate_output.pdf");
+
+                            // 1. Генерируем HTML
+                            if let Err(e) = generate_certificate_html(&cert, &student, &html_path) {
+                                return Err(format!("Ошибка генерации HTML: {}", e));
+                            }
+
+                            // 2. Конвертируем HTML в PDF
+                            if let Err(e) = generate_pdf_from_html(&html_path, &pdf_path) {
+                                return Err(format!("Ошибка конвертации в PDF: {}", e));
+                            }
+
+                            Ok(pdf_path)
+                        })
+                            .await
+                            .unwrap_or_else(|join_err| {
+                                Err(format!("Блокирующая задача (генерация PDF) завершилась ошибкой: {:?}", join_err))
+                            })
+                    },
+                    Message::CertificatePdfGenerated,
+                )
+            }
+            Message::CertificatePdfGenerated(result) => {
+                match result {
+                    Ok(path) => {
+                        self.error_message = format!("Сертификат успешно сохранен: {:?}", path.display());
+                        println!("DEBUG: Сертификат сохранен: {}", path.display());
+                        // Опционально: открыть файл во внешней программе
+                        #[cfg(target_os = "windows")]
+                        {
+                            if let Err(e) = open::that(path) {
+                                self.error_message = format!("Ошибка при открытии PDF: {}", e);
+                                eprintln!("Ошибка при открытии PDF: {}", e);
+                            }
+                        }
+                        #[cfg(target_os = "macos")]
+                        {
+                            if let Err(e) = open::that(path) {
+                                self.error_message = format!("Ошибка при открытии PDF: {}", e);
+                                eprintln!("Ошибка при открытии PDF: {}", e);
+                            }
+                        }
+                        #[cfg(target_os = "linux")]
+                        {
+                            // Для Linux может потребоваться 'xdg-open' или аналогичная утилита
+                            // Это сложнее, обычно вы просто сообщаете пользователю путь.
+                            // Или можно использовать крейт 'open'
+                            if let Err(e) = open::that(path) {
+                                self.error_message = format!("Ошибка при открытии PDF: {}", e);
+                                eprintln!("Ошибка при открытии PDF: {}", e);
+                            }
+                        }
+
+                    }
+                    Err(e) => {
+                        self.error_message = format!("Ошибка генерации сертификата: {}", e);
+                        eprintln!("Ошибка генерации сертификата: {}", self.error_message);
+                    }
+                }
+                Task::none()
             }
         }
         
@@ -2401,4 +2608,172 @@ async fn load_teacher_groups(teacher_email: String) -> Result<Vec<Group>, String
 
     db::get_groups_for_teacher(&conn, teacher_id)
         .map_err(|e| format!("Failed to load groups for teacher {}: {}", teacher_id, e))
+}
+pub fn generate_certificate_html(
+    cert: &Certificate,
+    student: &UserInfo,
+    output_path: &std::path::Path,
+) -> std::io::Result<()> {
+    let html_content = format!(
+        r#"<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<title>Сертификат</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fira+Sans&display=swap');
+
+  @page {{
+    size: A4;
+    margin: 0;
+  }}
+
+  body {{
+    font-family: 'Fira Sans', sans-serif;
+    background: #282828;
+    margin: 0;
+    padding: 0;
+    color: #ebdbb2;
+    width: 794px;
+    height: 1123px;
+  }}
+
+  .certificate {{
+    border: 8px solid #458588;
+    padding: 40px;
+    width: 718px; /* 794 - 2*8(border) - 2*30(margin) */
+    height: 1043px; /* 1123 - 2*40(padding top/bottom) */
+    margin: 0 auto;
+    background: #3c3836;
+    box-shadow: 0 0 15px rgba(0,0,0,0.5);
+    text-align: center;
+    border-radius: 12px;
+    position: relative;
+    box-sizing: border-box;
+  }}
+  h1 {{
+    font-size: 56px;
+    color: #fabd2f;
+    margin-bottom: 20px;
+  }}
+  p {{
+    font-size: 20px;
+    color: #ebdbb2;
+    margin: 15px 0;
+  }}
+  .student-name {{
+    font-weight: bold;
+    font-size: 40px;
+    color: #83a598;
+    margin: 30px 0;
+  }}
+  .course-title {{
+    font-weight: bold;
+    font-size: 34px;
+    margin: 20px 0;
+    color: #b8bb26;
+  }}
+  .grade {{
+    font-size: 22px;
+    margin: 15px 0;
+    font-weight: 600;
+    color: #fb4934;
+  }}
+  .footer {{
+    margin-top: 60px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 30px;
+  }}
+  .signature-box {{
+    width: 40%;
+    border-top: 1px solid #928374;
+    padding-top: 10px;
+    font-size: 18px;
+    font-weight: 600;
+    color: #ebdbb2;
+    position: relative;
+  }}
+  .signature-img {{
+    position: absolute;
+    top: -70px;
+    left: 0;
+    width: 150px;
+    height: auto;
+  }}
+  .stamp-img {{
+    width: 120px;
+    height: auto;
+    opacity: 0.5;
+    filter: drop-shadow(0 0 2px rgba(0,0,0,0.3));
+    margin-right: 10px;
+  }}
+  .date {{
+    font-size: 16px;
+    color: #a89984;
+    margin-top: 40px;
+  }}
+  .decorative-line {{
+    width: 60px;
+    height: 4px;
+    background: #d79921;
+    margin: 20px auto;
+    border-radius: 2px;
+  }}
+</style>
+</head>
+<body>
+  <div class="certificate">
+    <h1>СЕРТИФИКАТ</h1>
+    <div class="decorative-line"></div>
+    <p>Настоящим подтверждается, что</p>
+    <p class="student-name">{student_name}</p>
+    <p>успешно завершил(а) курс</p>
+    <p class="course-title">{course_title}</p>
+    <p class="grade">С оценкой: {grade}</p>
+    <div class="decorative-line"></div>
+
+    <div class="footer">
+      <div class="signature-box">
+        <img src="../assets/images/signature.png" alt="Подпись директора" class="signature-img" />
+        Подпись директора
+      </div>
+      <img src="../assets/images/seal.png" alt="Печать" class="stamp-img" />
+    </div>
+
+    <p class="date">Дата выдачи: {issue_date}</p>
+  </div>
+</body>
+</html>"#,
+        student_name = student.name,
+        course_title = cert.course_title,
+        grade = cert.grade,
+        issue_date = cert.issue_date
+    );
+
+    fs::write(output_path, html_content)
+}
+
+pub fn generate_pdf_from_html(html_path: &Path, output_pdf: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let browser = Browser::new(
+        LaunchOptionsBuilder::default()
+            .headless(true)
+            .build()
+            .unwrap(),
+    )?;
+
+    let tab = browser.new_tab()?;
+
+    let abs_path = fs::canonicalize(html_path)?;
+    let url = format!("file://{}", abs_path.to_str().unwrap());
+
+    tab.navigate_to(&url)?;
+    tab.wait_until_navigated()?;
+
+    let pdf_data = tab.print_to_pdf(Default::default())?;
+
+    fs::write(output_pdf, &pdf_data)?;
+
+    Ok(())
 }

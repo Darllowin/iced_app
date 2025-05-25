@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<title>Сертификат</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fira+Sans&display=swap');
+
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  body {
+    font-family: 'Fira Sans', sans-serif;
+    background: #282828;
+    margin: 0;
+    padding: 0;
+    color: #ebdbb2;
+    width: 794px;
+    height: 1123px;
+  }
+
+  .certificate {
+    border: 8px solid #458588;
+    padding: 40px;
+    width: 718px; /* 794 - 2*8(border) - 2*30(margin) */
+    height: 1043px; /* 1123 - 2*40(padding top/bottom) */
+    margin: 0 auto;
+    background: #3c3836;
+    box-shadow: 0 0 15px rgba(0,0,0,0.5);
+    text-align: center;
+    border-radius: 12px;
+    position: relative;
+    box-sizing: border-box;
+  }
+  h1 {
+    font-size: 56px;
+    color: #fabd2f;
+    margin-bottom: 20px;
+  }
+  p {
+    font-size: 20px;
+    color: #ebdbb2;
+    margin: 15px 0;
+  }
+  .student-name {
+    font-weight: bold;
+    font-size: 40px;
+    color: #83a598;
+    margin: 30px 0;
+  }
+  .course-title {
+    font-weight: bold;
+    font-size: 34px;
+    margin: 20px 0;
+    color: #b8bb26;
+  }
+  .grade {
+    font-size: 22px;
+    margin: 15px 0;
+    font-weight: 600;
+    color: #fb4934;
+  }
+  .footer {
+    margin-top: 60px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 30px;
+  }
+  .signature-box {
+    width: 40%;
+    border-top: 1px solid #928374;
+    padding-top: 10px;
+    font-size: 18px;
+    font-weight: 600;
+    color: #ebdbb2;
+    position: relative;
+  }
+  .signature-img {
+    position: absolute;
+    top: -70px;
+    left: 0;
+    width: 150px;
+    height: auto;
+  }
+  .stamp-img {
+    width: 120px;
+    height: auto;
+    opacity: 0.5;
+    filter: drop-shadow(0 0 2px rgba(0,0,0,0.3));
+    margin-right: 10px;
+  }
+  .date {
+    font-size: 16px;
+    color: #a89984;
+    margin-top: 40px;
+  }
+  .decorative-line {
+    width: 60px;
+    height: 4px;
+    background: #d79921;
+    margin: 20px auto;
+    border-radius: 2px;
+  }
+</style>
+</head>
+<body>
+  <div class="certificate">
+    <h1>СЕРТИФИКАТ</h1>
+    <div class="decorative-line"></div>
+    <p>Настоящим подтверждается, что</p>
+    <p class="student-name">qwerty test ytrewq</p>
+    <p>успешно завершил(а) курс</p>
+    <p class="course-title">Основы программирования</p>
+    <p class="grade">С оценкой: Удовлетворительно</p>
+    <div class="decorative-line"></div>
+
+    <div class="footer">
+      <div class="signature-box">
+        <img src="../assets/images/signature.png" alt="Подпись директора" class="signature-img" />
+        Подпись директора
+      </div>
+      <img src="../assets/images/seal.png" alt="Печать" class="stamp-img" />
+    </div>
+
+    <p class="date">Дата выдачи: 2025-05-25</p>
+  </div>
+</body>
+</html>

@@ -28,7 +28,8 @@ fn content(group: Group, app: &App) -> Column<Message> {
     let content_col = Column::new()
         .push(Text::new(format!("Курс: {}", course_name)).size(22))
         .push(Text::new(format!("Преподаватель: {}", teacher_name)).size(22))
-        .push(Text::new(format!("Количество студентов: {}", group.student_count)).size(22));
+        .push(Text::new(format!("Количество студентов: {}", group.student_count)).size(22))
+        .push(Text::new(format!("Статус: {}", group.status)).size(22));
 
     Column::new().push(
         Container::new(content_col)
@@ -40,8 +41,7 @@ fn content(group: Group, app: &App) -> Column<Message> {
 
 pub fn groups_screen(app: &App) -> Container<Message> {
     let filter = app.group_filter_text.to_lowercase();
-    // Используем app.all_groups, так как этот экран только для администратора
-    let filtered_groups: Vec<Group> = app.all_groups // <-- ИСПОЛЬЗУЕМ app.all_groups
+    let filtered_groups: Vec<Group> = app.all_groups
         .iter()
         .filter(|g| {
             g.name.to_lowercase().contains(&filter)
@@ -224,13 +224,15 @@ pub fn groups_screen(app: &App) -> Container<Message> {
         let submit_message = if is_editing { Message::SubmitEditedGroup } else { Message::SubmitNewGroup };
         let cancel_message = if is_editing { Message::CancelEditingGroup } else { Message::ToggleAddGroupModal(false) };
 
-        let (name_value, course_selected_value, teacher_selected_value, name_changed_msg, course_changed_msg, teacher_changed_msg): (
+        let (name_value, course_selected_value, teacher_selected_value, status_selected_value, name_changed_msg, course_changed_msg, teacher_changed_msg, status_changed_msg): (
             &String,
             Option<Course>,
             Option<UserInfo>,
+            &String,
             Box<dyn Fn(String) -> Message>,
             Box<dyn Fn(Option<Course>) -> Message>,
-            Box<dyn Fn(Option<UserInfo>) -> Message>
+            Box<dyn Fn(Option<UserInfo>) -> Message>,
+            Box<dyn Fn(String) -> Message>
         ) = if is_editing {
             (
                 &app.edit_group_name,
@@ -240,9 +242,11 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                 app.edit_group_teacher.and_then(|teacher_id| {
                     app.users_for_picklist.iter().find(|u| u.id == teacher_id).cloned()
                 }),
+                &app.edit_group_status,
                 Box::new(Message::EditGroupNameChanged),
                 Box::new(Message::EditGroupCourseChanged),
                 Box::new(Message::EditGroupTeacherChanged),
+                Box::new(Message::EditGroupStatusChanged),
             )
         } else {
             (
@@ -253,9 +257,11 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                 app.new_group_teacher.and_then(|teacher_id| {
                     app.users_for_picklist.iter().find(|u| u.id == teacher_id).cloned()
                 }),
+                &app.new_group_status,
                 Box::new(Message::NewGroupNameChanged),
                 Box::new(Message::NewGroupCourseChanged),
                 Box::new(Message::NewGroupTeacherChanged),
+                Box::new(Message::NewGroupStatusChanged),
             )
         };
         let modal_column = Column::new().spacing(10).width(Length::Fill)
@@ -274,6 +280,7 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                     teacher_changed_msg(Some(user_selected_from_picklist))
                 },
             ).placeholder("Выберите преподавателя"))
+            .push(TextInput::new("Статус группы", status_selected_value).on_input(move |s| status_changed_msg(s)))
             .push(Text::new(app.group_error_message.clone().unwrap_or_default()))
             .push(
                 Row::new()
@@ -308,7 +315,7 @@ pub fn groups_screen(app: &App) -> Container<Message> {
         let mut lessons_col = Column::new().spacing(10);
 
         if !app.group_lessons_modal_lessons.is_empty() {
-            lessons_col = lessons_col.push(Text::new("Доступные занятия").size(20).color(Color::from_rgb8(0, 100, 0)));
+            lessons_col = lessons_col.push(Text::new("Доступные занятия").size(20).color(Color::from_rgb8(142, 192, 124)));
             for lesson in &app.group_lessons_modal_lessons {
                 // lesson.title - это String, поэтому .as_ref().map_or() не нужен
                 lessons_col = lessons_col.push(
@@ -319,7 +326,7 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                             .push(Text::new(format!("{}. {}", lesson.number, lesson.title)).width(Length::FillPortion(1)))
                             .push(Text::new("Статус: Предстоит").color(Color::from_rgb8(0, 150, 0)))
                     )
-                        .padding(5)
+                        .padding(20)
                         .width(Length::Fill)
                         .style(move |_| bordered_box(&app.theme))
                 );
@@ -333,13 +340,13 @@ pub fn groups_screen(app: &App) -> Container<Message> {
         if !app.group_lessons_modal_past_sessions.is_empty() {
             lessons_col = lessons_col.push(Text::new("Пройденные занятия").size(20).color(Color::from_rgb8(200, 0, 0)));
             for past_session in &app.group_lessons_modal_past_sessions {
-                // past_session.lesson_title - это Option<String>, поэтому .as_ref().map_or() нужен
                 let lesson_title_display = past_session.lesson_title
                     .as_ref()
                     .map_or("Не указано".to_string(), |s| s.clone());
 
-                lessons_col = lessons_col.push(
-                    Container::new(
+                let mut session_detail_col = Column::new()
+                    .spacing(5)
+                    .push(
                         Row::new()
                             .spacing(10)
                             .align_y(Alignment::Center)
@@ -347,9 +354,36 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                                                     past_session.lesson_number.unwrap_or(0),
                                                     lesson_title_display,
                                                     past_session.date)).width(Length::FillPortion(1)))
-                            .push(Text::new("Статус: Пройдено").color(Color::from_rgb8(150, 0, 0)))
-                    )
-                        .padding(5)
+                            .push(Text::new("Статус: Пройдено").color(Color::from_rgb8(204, 36, 29)))
+                    );
+
+                // ЛОГИКА ОТОБРАЖЕНИЯ ПОСЕЩАЕМОСТИ СТУДЕНТОВ ---
+                if !past_session.attendance_records.is_empty() {
+                    session_detail_col = session_detail_col.push(
+                        Text::new("Посещаемость студентов:").center()
+                    );
+                    for record in &past_session.attendance_records {
+                        let status_color = if record.present_status == "Present" {
+                            Color::from_rgb8(142, 192, 124) // Зеленый для "Присутствовал"
+                        } else {
+                            Color::from_rgb8(204, 36, 29) // Красный для "Отсутствовал"
+                        };
+                        session_detail_col = session_detail_col.push(
+                            Text::new(format!("  • {}: {}", record.student_name, record.present_status))
+                                .size(14)
+                                .color(status_color)
+                        );
+                    }
+                } else {
+                    session_detail_col = session_detail_col.push(
+                        Text::new("  Нет данных о посещаемости для этого занятия.").size(14)
+                    );
+                }
+                // --- КОНЕЦ НОВОЙ ЛОГИКИ ---
+
+                lessons_col = lessons_col.push(
+                    Container::new(session_detail_col) // Используем Column для деталей сессии
+                        .padding(20)
                         .width(Length::Fill)
                         .style(move |_| bordered_box(&app.theme))
                 );

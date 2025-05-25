@@ -148,7 +148,6 @@ pub fn classes_screen(app: &App) -> Container<Message> {
             ).style(move |_| background(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.7 }))
         );
 
-        // Содержимое модального окна
         ui_stack = ui_stack.push(
             Container::new(
                 Column::new()
@@ -165,7 +164,7 @@ pub fn classes_screen(app: &App) -> Container<Message> {
                                 Column::new()
                                     .spacing(10)
                                     // Создаем вектор элементов для студентов
-                                    .extend({ // <--- Обратите внимание на этот блок
+                                    .extend({ 
                                         let mut student_rows: Vec<Element<'_, Message, Theme, Renderer>> = Vec::new();
 
                                         if app.students_for_attendance.is_empty() {

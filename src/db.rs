@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use image::imageops::FilterType;
 use image::ImageReader;
-use rusqlite::{params, Connection, OptionalExtension, Result, Error, ffi, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Result, Error, ffi, Transaction, params_from_iter};
 use serde::de::StdError;
 use tokio::task;
-use crate::app::state::{Assignment, Course, Group, LessonWithAssignments, PastSession, Payment, UserInfo, PATH_TO_DB};
+use crate::app::state::{Assignment, Certificate, Course, Group, LessonWithAssignments, PastSession, Payment, StudentAttendanceStatus, UserInfo, PATH_TO_DB};
 
 
 pub async fn authenticate_and_get_user_data(
@@ -291,7 +291,8 @@ pub fn get_all_groups(conn: &Connection) -> Result<Vec<Group>> {
             G.teacher_id,
             C.title AS course_name,
             U.Name AS teacher_name,
-            G.student_count
+            G.student_count,
+            G.status
         FROM \"Group\" G
         LEFT JOIN \"Course\" C ON G.course_id = C.ID
         LEFT JOIN Users U ON G.teacher_id = U.ID
@@ -307,6 +308,7 @@ pub fn get_all_groups(conn: &Connection) -> Result<Vec<Group>> {
             course_name: row.get("course_name")?,
             teacher_name: row.get("teacher_name")?,
             student_count: row.get("student_count")?,
+            status: row.get("status")?,
         })
     })?;
 
@@ -324,7 +326,8 @@ pub fn get_teacher_groups_with_details(conn: &Connection, teacher_id: i32) -> Re
             G.teacher_id,
             C.title AS course_name,
             U.Name AS teacher_name,
-            G.student_count -- ИСПРАВЛЕНО: Теперь берем из столбца G.student_count
+            G.student_count,
+            G.status
         FROM \"Group\" G
         JOIN \"Course\" C ON G.course_id = C.ID
         JOIN Users U ON G.teacher_id = U.ID
@@ -341,6 +344,7 @@ pub fn get_teacher_groups_with_details(conn: &Connection, teacher_id: i32) -> Re
             course_name: row.get("course_name")?,
             teacher_name: row.get("teacher_name")?,
             student_count: row.get("student_count")?,
+            status: row.get("status")?,
         })
     })?;
 
@@ -554,7 +558,8 @@ pub fn get_student_group_by_user_id(conn: &Connection, user_id: i32) -> Result<O
             G.teacher_id,
             C.title AS course_name,
             U.Name AS teacher_name,
-            G.student_count -- ИСПРАВЛЕНО: Теперь берем из столбца G.student_count
+            G.student_count, 
+            G.status
         FROM \"Group\" G
         JOIN GroupStudent GS ON G.id = GS.group_id
         JOIN Users U ON G.teacher_id = U.ID
@@ -571,6 +576,7 @@ pub fn get_student_group_by_user_id(conn: &Connection, user_id: i32) -> Result<O
             course_name: row.get("course_name")?,
             teacher_name: row.get("teacher_name")?,
             student_count: row.get("student_count")?,
+            status: row.get("status")?,
         })
     }).optional()?;
 
@@ -614,18 +620,18 @@ pub fn get_students_without_group(conn: &Connection) -> Result<Vec<UserInfo>> {
     println!("DEBUG DB: Загружено студентов без группы: {} шт.", students.len());
     Ok(students)
 }
-pub fn insert_group(conn: &Connection, name: &str, course_id: i32, teacher_id: i32) -> Result<()> {
+pub fn insert_group(conn: &Connection, name: &str, course_id: i32, teacher_id: i32, status: &str) -> Result<()> {
     conn.execute(
-        "INSERT INTO `Group` (name, course_id, teacher_id, student_count) VALUES (?1, ?2, ?3, ?4)",
-        params![name, course_id, teacher_id, 0],
+        "INSERT INTO `Group` (name, course_id, teacher_id, student_count, status) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![name, course_id, teacher_id, 0, status],
     )?;
     Ok(())
 }
 
-pub fn update_group(conn: &Connection, id: i32, name: &str, course_id: i32, teacher_id: i32) -> Result<()> {
+pub fn update_group(conn: &Connection, id: i32, name: &str, course_id: i32, teacher_id: i32, status: &str) -> Result<()> {
     conn.execute(
-        "UPDATE \"Group\" SET name = ?, course_id = ?, teacher_id = ? WHERE id = ?",
-        params![name, course_id, teacher_id, id],
+        "UPDATE \"Group\" SET name = ?, course_id = ?, teacher_id = ?, status = ? WHERE id = ?",
+        params![name, course_id, teacher_id, status, id],
     )?;
     Ok(())
 }
@@ -865,7 +871,8 @@ pub fn get_groups_for_teacher(conn: &Connection, teacher_id: i32) -> Result<Vec<
             C.title AS course_title, -- Название курса
             G.teacher_id,      -- Включаем ID учителя
             U_teacher.name AS teacher_name, -- Имя учителя
-            COUNT(GS.student_id) AS student_count
+            COUNT(GS.student_id) AS student_count,
+            G.status
         FROM \"Group\" G
         LEFT JOIN Course C ON G.course_id = C.id
         LEFT JOIN Users U_teacher ON G.teacher_id = U_teacher.id
@@ -885,6 +892,7 @@ pub fn get_groups_for_teacher(conn: &Connection, teacher_id: i32) -> Result<Vec<
             teacher_id: row.get("teacher_id")?,      // Получаем ID учителя
             teacher_name: row.get("teacher_name")?, // Получаем имя учителя
             student_count: row.get("student_count")?,
+            status: row.get("status")?,
         })
     })?.collect::<Result<Vec<_>>>()?;
 
@@ -896,7 +904,8 @@ pub fn get_groups_for_teacher(conn: &Connection, teacher_id: i32) -> Result<Vec<
     Ok(groups)
 }
 pub fn get_past_sessions_for_group(conn: &Connection, group_id: i32) -> Result<Vec<PastSession>> {
-    let mut stmt = conn.prepare("
+    // 1. Загружаем основные данные прошедших сессий
+    let mut stmt_sessions = conn.prepare("
         SELECT
             PS.id,
             PS.group_id,
@@ -910,19 +919,73 @@ pub fn get_past_sessions_for_group(conn: &Connection, group_id: i32) -> Result<V
         ORDER BY PS.date DESC
     ")?;
 
-    let sessions_iter = stmt.query_map(params![group_id], |row| {
+    let sessions_iter = stmt_sessions.query_map(params![group_id], |row| {
         Ok(PastSession {
             id: row.get("id")?,
             group_id: row.get("group_id")?,
             date: row.get("date")?,
             lesson_id: row.get("lesson_id")?,
             lesson_title: row.get("lesson_title")?,
-            lesson_number: row.get("lesson_number")?, // .get("number")? если прямо L.number
+            lesson_number: row.get("lesson_number")?,
+            attendance_records: Vec::new(), // Инициализируем пустым, заполним позже
         })
     })?;
 
-    let sessions: Vec<PastSession> = sessions_iter.collect::<Result<Vec<_>, Error>>()?;
-    Ok(sessions)
+    let mut past_sessions_map: HashMap<i32, PastSession> = sessions_iter
+        .map(|res| res.map(|session| (session.id, session)))
+        .collect::<Result<HashMap<i32, PastSession>, Error>>()?;
+
+    // 2. Загружаем данные о посещаемости для всех этих прошедших сессий
+    // Используем `IN` для фильтрации по ID сессий
+    if past_sessions_map.is_empty() {
+        return Ok(Vec::new()); // Если нет прошедших сессий, сразу возвращаем пустой вектор
+    }
+
+    let session_ids: Vec<i32> = past_sessions_map.keys().cloned().collect();
+    let query_placeholders = session_ids.iter().map(|_| "?").collect::<Vec<&str>>().join(",");
+
+    let query_attendance = format!("
+        SELECT
+            A.id,
+            A.lesson_id AS past_session_id, -- lesson_id в Attendance фактически ссылается на PastSession.id
+            A.student_id,
+            U.Name AS student_name,
+            A.present AS present_status
+        FROM Attendance A
+        JOIN Users U ON A.student_id = U.ID
+        WHERE A.lesson_id IN ({}) -- Используем PastSession.id, т.к. в схеме Attendance.lesson_id ссылается на PastSessions.id
+        ORDER BY A.lesson_id, U.Name
+    ", query_placeholders);
+
+    let mut stmt_attendance = conn.prepare(&query_attendance)?;
+
+    // Преобразуем Vec<i32> в Vec<rusqlite::params::Value> для использования в query_map
+    let attendance_iter = stmt_attendance.query_map(params_from_iter(session_ids.iter()), |row| {
+        Ok((
+            row.get("past_session_id")?, // ID PastSession, к которой относится эта запись
+            StudentAttendanceStatus {
+                student_id: row.get("student_id")?,
+                student_name: row.get("student_name")?,
+                present_status: row.get("present_status")?,
+            }
+        ))
+    })?;
+
+    // 3. Распределяем записи о посещаемости по соответствующим PastSession
+    for res in attendance_iter {
+        let (past_session_id, attendance_record) = res?;
+        if let Some(session) = past_sessions_map.get_mut(&past_session_id) {
+            session.attendance_records.push(attendance_record);
+        }
+    }
+
+    // 4. Преобразуем HashMap обратно в Vec<PastSession>
+    let mut final_sessions: Vec<PastSession> = past_sessions_map.into_values().collect();
+    // Сохраняем исходный порядок, если это важно (например, по дате DESC)
+    final_sessions.sort_by_key(|s| s.date.clone()); // или по id, или по дате, как вам нужно
+    final_sessions.reverse(); // Чтобы сохранить убывающий порядок по дате, если `sort_by_key` его отменил
+
+    Ok(final_sessions)
 }
 pub fn add_past_session(conn: &Connection, group_id: i32, lesson_id: i32) -> Result<i32> {
     let now: chrono::DateTime<chrono::Local> = chrono::Local::now();
@@ -1037,7 +1100,8 @@ pub fn get_groups_by_course_id(conn: &Connection, course_id: i32) -> Result<Vec<
             G.teacher_id,
             G.name,
             G.student_count,
-            U.Name AS teacher_name -- Включаем имя учителя
+            U.Name AS teacher_name,
+            G.status
         FROM \"Group\" G
         LEFT JOIN Users U ON G.teacher_id = U.ID
         WHERE G.course_id = ?1
@@ -1053,6 +1117,7 @@ pub fn get_groups_by_course_id(conn: &Connection, course_id: i32) -> Result<Vec<
             student_count: row.get("student_count")?,
             course_name: None, // Не получаем здесь название курса
             teacher_name: row.get("teacher_name").ok(),
+            status: row.get("status")?,
         })
     })?;
     groups_iter.collect::<Result<Vec<_>>>()
@@ -1130,4 +1195,228 @@ pub fn add_attendance(
         params![group_id, past_session_id, student_id, present_status],
     )?;
     Ok(())
+}
+/// Получает общее количество уроков для данного курса.
+pub fn get_total_lessons_for_course(conn: &Connection, course_id: i32) -> Result<i32> {
+    let mut stmt = conn.prepare("SELECT COUNT(*) FROM Lessons WHERE course_id = ?1")?;
+    let count: i32 = stmt.query_row(params![course_id], |row| row.get(0))?;
+    Ok(count)
+}
+
+/// Получает количество посещенных уроков студентом в определенной группе.
+/// Возвращает HashMap<student_id, count_of_attended_lessons>
+pub fn get_student_attendance_counts(
+    conn: &Connection,
+    group_id: i32,
+) -> Result<HashMap<i32, i32>> {
+    let mut stmt = conn.prepare("
+        SELECT
+            A.student_id,
+            COUNT(CASE WHEN A.present = 'Present' THEN 1 ELSE NULL END) AS attended_lessons_count
+        FROM Attendance A
+        WHERE A.group_id = ?1
+        GROUP BY A.student_id
+    ")?;
+
+    let mut attendance_counts = HashMap::new();
+    let iter = stmt.query_map(params![group_id], |row| {
+        Ok((row.get("student_id")?, row.get("attended_lessons_count")?))
+    })?;
+
+    for result in iter {
+        let (student_id, count) = result?;
+        attendance_counts.insert(student_id, count);
+    }
+    Ok(attendance_counts)
+}
+
+/// Добавляет запись о сертификате.
+/// Используем `&Transaction` для атомарности, если вызывается внутри транзакции.
+pub fn add_certificate(
+    tx: &Transaction, // <--- Важно: используем транзакцию
+    student_id: i32,
+    course_id: i32,
+    issue_date: &str,
+    grade: &str,
+) -> Result<i32> {
+    // Для простоты пока оставим grade_or_status, так как в схеме у вас grade TEXT NOT NULL
+    tx.execute(
+        "INSERT INTO Certificates (student_id, course_id, issue_date, grade) VALUES (?1, ?2, ?3, ?4)",
+        params![student_id, course_id, issue_date, grade],
+    )?;
+    Ok(tx.last_insert_rowid() as i32)
+}
+
+/// Проверяет, завершила ли группа все занятия и выдает сертификаты.
+/// Эту функцию следует вызывать после сохранения посещаемости.
+pub fn check_course_completion_and_issue_certificates(
+    tx: &Transaction, // Эта функция уже корректно принимает `&Transaction`
+    group_id: i32,
+    course_id: i32,
+) -> Result<()> {
+    println!("DEBUG DB: Проверка завершения курса для группы {} и курса {}", group_id, course_id);
+
+    // УДАЛИТЕ ЭТУ СТРОКУ: let conn_ref = tx.conn(); // Больше не нужна
+
+    // 1. Получаем общее количество уроков в курсе
+    // Передаем `tx` напрямую
+    let total_lessons_in_course = get_total_lessons_for_course(tx, course_id)?;
+    println!("DEBUG DB: Всего уроков в курсе {}: {}", course_id, total_lessons_in_course);
+
+    // 2. Получаем количество прошедших занятий для этой группы (только уникальные lesson_id)
+    // Используем `tx` напрямую для prepare
+    let mut past_sessions_count_stmt = tx.prepare("
+        SELECT COUNT(DISTINCT lesson_id) FROM PastSessions WHERE group_id = ?1
+    ")?;
+    let completed_lessons_count: i32 = past_sessions_count_stmt.query_row(params![group_id], |row| row.get(0))?;
+    println!("DEBUG DB: Проведено уникальных уроков для группы {}: {}", group_id, completed_lessons_count);
+
+
+    if completed_lessons_count >= total_lessons_in_course && total_lessons_in_course > 0 {
+        println!("DEBUG DB: Группа {} завершила все уроки курса {}. Выдача сертификатов.", group_id, course_id);
+
+        // Получаем всех студентов в группе
+        // Используем `tx` напрямую для prepare
+        let mut students_in_group_stmt = tx.prepare("
+            SELECT U.ID, U.Name FROM Users U
+            JOIN GroupStudent GS ON U.ID = GS.student_id
+            WHERE GS.group_id = ?1
+        ")?;
+        let students_iter = students_in_group_stmt.query_map(params![group_id], |row| {
+            Ok(UserInfo {
+                id: row.get("ID")?,
+                name: row.get("Name")?,
+                user_type: "".to_string(),
+                email: "".to_string(),
+                avatar_data: None,
+                group_id: None,
+                birthday: "".to_string(),
+                child_count: None,
+            })
+        })?;
+        let students_in_group: Vec<UserInfo> = students_iter.collect::<Result<Vec<_>, Error>>()?;
+        println!("DEBUG DB: Студентов в группе {}: {}", group_id, students_in_group.len());
+
+
+        // Получаем данные о посещаемости для всех студентов в этой группе
+        // Передаем `tx` напрямую
+        let student_attendance_counts = get_student_attendance_counts(tx, group_id)?;
+        println!("DEBUG DB: Собраны данные посещаемости для {} студентов.", student_attendance_counts.len());
+
+
+        let now: chrono::DateTime<chrono::Local> = chrono::Local::now();
+        let issue_date_str = now.format("%Y-%m-%d").to_string();
+
+        for student in students_in_group {
+            let attended_lessons = student_attendance_counts.get(&student.id).copied().unwrap_or(0);
+            println!("DEBUG DB: Студент {}: {} из {} уроков посетил.", student.name, attended_lessons, total_lessons_in_course);
+
+            let grade = if total_lessons_in_course > 0 {
+                let percentage = (attended_lessons as f64 / total_lessons_in_course as f64) * 100.0;
+                if percentage >= 100.0 {
+                    "Отлично".to_string()
+                } else if percentage >= 75.0 {
+                    "Хорошо".to_string()
+                } else {
+                    "Удовлетворительно".to_string()
+                }
+            } else {
+                "Неизвестно".to_string()
+            };
+
+            // Проверяем, есть ли уже сертификат у студента за этот курс
+            // Используем `tx` напрямую для prepare
+            let mut cert_exists_stmt = tx.prepare("
+                SELECT COUNT(*) FROM Certificates WHERE student_id = ?1 AND course_id = ?2
+            ")?;
+            let cert_exists: i32 = cert_exists_stmt.query_row(params![student.id, course_id], |row| row.get(0))?;
+
+            if cert_exists == 0 {
+                // Добавляем сертификат, используя текущую транзакцию
+                add_certificate(tx, student.id, course_id, &issue_date_str, &grade)?;
+                println!("DEBUG DB: Сертификат выдан студенту {} за курс {} с оценкой '{}'.", student.name, course_id, grade);
+            } else {
+                println!("DEBUG DB: Сертификат для студента {} за курс {} уже существует.", student.name, course_id);
+            }
+        }
+        // --- ДОБАВЛЯЕМ ЛОГИКУ ОБНОВЛЕНИЯ СТАТУСА ГРУППЫ ЗДЕСЬ ---
+        println!("DEBUG DB: Обновление статуса группы {} на 'Неактивна'.", group_id);
+        tx.execute(
+            "UPDATE `Group` SET status = 'Неактивна' WHERE ID = ?1",
+            params![group_id],
+        )?;
+        println!("DEBUG DB: Статус группы {} успешно обновлен на 'Неактивна'.", group_id);
+        
+    } else {
+        println!("DEBUG DB: Группа {} еще не завершила все уроки курса {}.", group_id, course_id);
+    }
+    Ok(())
+}
+/// Получает список студентов (UserInfo), у которых есть хотя бы один сертификат,
+/// с количеством их сертификатов.
+pub fn get_students_with_certificates_info(conn: &Connection) -> Result<Vec<UserInfo>> {
+    let mut stmt = conn.prepare("
+        SELECT
+            U.ID,
+            U.Name,
+            U.Email,
+            U.Birthday,
+            U.Type, -- Соответствует user_type
+            U.AvatarData,
+            COUNT(C.id) AS certificate_count -- Дополнительное поле
+        FROM Users U
+        JOIN Certificates C ON U.ID = C.student_id
+        WHERE U.Type = 'student' -- Убеждаемся, что получаем только студентов
+        GROUP BY U.ID, U.Name, U.Email, U.Birthday, U.Type, U.AvatarData
+        ORDER BY U.Name ASC
+    ")?;
+
+    let students_iter = stmt.query_map(params![], |row| {
+        Ok(UserInfo {
+            id: row.get("ID")?,
+            name: row.get("Name")?,
+            email: row.get("Email")?,
+            birthday: row.get("Birthday")?,
+            user_type: row.get("Type")?, // Используем "Type" из БД
+            avatar_data: row.get("AvatarData")?,
+            group_id: None, // Не получаем здесь информацию о группе
+            child_count: row.get("certificate_count").ok(), // Используем certificate_count как child_count временно для удобства, либо добавьте отдельное поле в UserInfo если часто нужно (например, `cert_count: Option<i32>`)
+        })
+    })?;
+
+    students_iter.collect()
+}
+
+/// Получает все сертификаты для конкретного студента.
+// Эта функция остается без изменений
+pub fn get_certificates_for_student(conn: &Connection, student_id: i32) -> Result<Vec<Certificate>> {
+    let mut stmt = conn.prepare("
+        SELECT
+            C.id,
+            C.student_id,
+            U.Name AS student_name,
+            C.course_id,
+            Co.title AS course_title,
+            C.issue_date,
+            C.grade
+        FROM Certificates C
+        JOIN Users U ON C.student_id = U.ID
+        JOIN Course Co ON C.course_id = Co.ID
+        WHERE C.student_id = ?1
+        ORDER BY C.issue_date DESC, Co.title ASC
+    ")?;
+
+    let certificates_iter = stmt.query_map(params![student_id], |row| {
+        Ok(Certificate {
+            id: row.get("id")?,
+            student_id: row.get("student_id")?,
+            student_name: row.get("student_name")?,
+            course_id: row.get("course_id")?,
+            course_title: row.get("course_title")?,
+            issue_date: row.get("issue_date")?,
+            grade: row.get("grade")?,
+        })
+    })?;
+
+    certificates_iter.collect()
 }

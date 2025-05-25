@@ -1,7 +1,7 @@
 use iced::Length;
 use iced::widget::{Column, Container, Row};
 use crate::app::state::Screen;
-use crate::screens::{classes_screen, courses_screen, groups_screen, login_screen, nav_menu, payment_screen, profile_screen, register_screen, settings_screen, user_list_screen};
+use crate::screens::{certificates_screen, classes_screen, courses_screen, groups_screen, login_screen, nav_menu, payment_screen, profile_screen, register_screen, settings_screen, user_list_screen};
 use super::{App, Message};
 
 impl App {
@@ -33,6 +33,7 @@ impl App {
                     Screen::GroupList => groups_screen(self),
                     Screen::Classes => classes_screen(self),
                     Screen::Payment => payment_screen(self),
+                    Screen::Certificates => certificates_screen(self),
                 }
                     .width(Length::Fill),
             )

@@ -1,5 +1,6 @@
+use std::path::PathBuf;
 use iced_aw::date_picker::Date;
-use crate::app::state::{Assignment, AssignmentType, Course, CoursePickListItem, Group, GroupPickListItem, LessonWithAssignments, Level, PastSession, Payment, StudentAttendance, StudentPickListItem, TextInputOrEditorInput, UserInfo};
+use crate::app::state::{Assignment, AssignmentType, Certificate, Course, CoursePickListItem, Group, GroupPickListItem, LessonWithAssignments, Level, PastSession, Payment, StudentAttendance, StudentPickListItem, TextInputOrEditorInput, UserInfo};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -22,7 +23,8 @@ pub enum Message {
     GoToUserList,
     GoToGroupList,
     GoToClasses,
-    GOToPayment,
+    GoToPayment,
+    GoToCertificates,
     Logout,
     //
     ThemeSelected(&'static str),
@@ -72,10 +74,12 @@ pub enum Message {
     NewGroupNameChanged(String),
     NewGroupCourseChanged(Option<Course>),
     NewGroupTeacherChanged(Option<UserInfo>),
+    NewGroupStatusChanged(String),
 
     EditGroupNameChanged(String),
     EditGroupCourseChanged(Option<Course>),
     EditGroupTeacherChanged(Option<UserInfo>),
+    EditGroupStatusChanged(String),
 
     SubmitNewGroup,
     SubmitEditedGroup,
@@ -180,4 +184,17 @@ pub enum Message {
     SaveAttendance, // Для сохранения посещаемости и проведенного занятия
     StudentsForAttendanceLoaded(Result<Vec<StudentAttendance>, String>), // Callback для загрузки студентов
     AttendanceSavedResult(Result<Vec<PastSession>, String>), // Callback после сохранения посещаемости
+
+    CourseCompletionChecked(Result<(), String>), // Результат проверки завершения курса
+    //CertificatesLoaded(Result<Vec<Certificate>, String>),
+    // Изменено: теперь StudentsWithCertificatesLoaded принимает Vec<UserInfo>
+    StudentsWithCertificatesLoaded(Result<Vec<UserInfo>, String>),
+
+    // Изменено: OpenStudentCertificatesModal теперь принимает UserInfo
+    OpenStudentCertificatesModal(UserInfo),
+    StudentCertificatesLoaded(Result<Vec<Certificate>, String>),
+    CloseStudentCertificatesModal,
+    // Сообщение для генерации сертификата
+    GenerateCertificatePdf(Certificate, UserInfo),
+    CertificatePdfGenerated(Result<PathBuf, String>), // Результат генерации PDF: путь к файлу или ошибка
 }

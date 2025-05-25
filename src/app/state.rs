@@ -1,6 +1,6 @@
 use std::fmt;
 use std::str::FromStr;
-use iced::Theme;
+use iced::{Theme};
 use iced::widget::text_editor;
 use iced_aw::date_picker::Date;
 use serde::{Deserialize, Serialize};
@@ -8,7 +8,7 @@ use crate::app::update::load_theme;
 
 pub const PATH_TO_DB: &str = "db_platform";
 pub const CONFIG_FILE: &str = "config.json";
-pub const DEFAULT_AVATAR: &str = "default_avatar.jpg";
+pub const DEFAULT_AVATAR: &str = "assets/images/default_avatar.jpg";
 
 pub struct App {
     pub date: Date,
@@ -74,11 +74,13 @@ pub struct App {
     pub new_group_name: String,
     pub new_group_course: Option<i32>,
     pub new_group_teacher: Option<i32>,
+    pub new_group_status: String,
 
     pub editing_group: Option<Group>,
     pub edit_group_name: String,
     pub edit_group_course: Option<i32>,
     pub edit_group_teacher: Option<i32>,
+    pub edit_group_status: String,
 
     pub group_filter_text: String,
 
@@ -165,8 +167,16 @@ pub struct App {
     pub students_for_attendance: Vec<StudentAttendance>, // Для хранения данных о студентах в модальном окне
     pub current_lesson_to_conduct: Option<LessonWithAssignments>, // Хранит урок, который проводится
     pub current_group_for_attendance: Option<Group>, // Хранит группу для отметки посещаемости
-}
 
+    //
+    pub students_with_certificates: Vec<UserInfo>,
+
+    pub show_student_certificates_modal: bool, // Флаг для показа модалки сертификатов студента
+    // НОВОЕ: Используем UserInfo для выбранного студента в модалке
+    pub selected_student_for_certificates: Option<UserInfo>,
+    pub selected_student_certs: Vec<Certificate>, // Сертификаты выбранного студента
+    pub is_loading_student_certs: bool, // Флаг загрузки сертификатов студента
+}
 impl Default for App {
     fn default() -> Self {
         let selected_theme = load_theme().unwrap_or(Theme::Light);
@@ -222,10 +232,12 @@ impl Default for App {
             new_group_name: "".to_string(),
             new_group_course: None,
             new_group_teacher: None,
+            new_group_status: "".to_string(),
             editing_group: None,
             edit_group_name: "".to_string(),
             edit_group_course: None,
             edit_group_teacher: None,
+            edit_group_status: "".to_string(),
             group_filter_text: "".to_string(),
             is_manage_students_modal_open: false,
             selected_student_to_add: None,
@@ -287,9 +299,32 @@ impl Default for App {
             current_lesson_to_conduct: None,
             new_payment_group: None,
             current_group_for_attendance: None,
+            students_with_certificates: vec![],
+            show_student_certificates_modal: false,
+            selected_student_for_certificates: None,
+            selected_student_certs: vec![],
+            is_loading_student_certs: false,
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Certificate {
+    pub id: i32,
+    pub student_id: i32,
+    pub student_name: String, // Для отображения имени студента
+    pub course_id: i32,
+    pub course_title: String, // Для отображения названия курса
+    pub issue_date: String,
+    pub grade: String,
+}
+#[derive(Debug, Clone)]
+pub struct StudentAttendanceStatus {
+    pub student_id: i32,
+    pub student_name: String, // Имя студента
+    pub present_status: String, // "Present" или "Absent"
+}
+
 #[derive(Debug, Clone)]
 pub struct StudentAttendance {
     pub id: i32,
@@ -350,6 +385,7 @@ pub struct Group {
     pub teacher_id: Option<i32>,      // Сохраняем ID преподавателя
     pub teacher_name: Option<String>, // Новое поле для имени преподавателя
     pub student_count: u8,
+    pub status: String,
 }
 
 impl fmt::Display for Group {
@@ -459,6 +495,7 @@ pub struct PastSession {
     pub lesson_id: i32,
     pub lesson_number: Option<i32>,
     pub lesson_title: Option<String>,
+    pub attendance_records: Vec<StudentAttendanceStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -588,5 +625,6 @@ pub enum Screen {
     UserList,
     GroupList,
     Classes,
-    Payment
+    Payment,
+    Certificates
 }
