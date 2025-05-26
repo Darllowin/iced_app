@@ -3,6 +3,8 @@ use std::str::FromStr;
 use iced::{Theme};
 use iced::widget::text_editor;
 use iced_aw::date_picker::Date;
+use rusqlite::ToSql;
+use rusqlite::types::{FromSql, FromSqlError, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
 use crate::app::update::load_theme;
 
@@ -52,6 +54,15 @@ pub struct App {
     pub edit_course_seats: i32,
     pub edit_course_price: f64,
     //
+    // Новые поля для строкового ввода чисел в модальном окне курса
+    pub new_course_total_seats_str: String,
+    pub new_course_seats_str: String,
+    pub new_course_price_str: String,
+
+    pub edit_course_total_seats_str: String,
+    pub edit_course_seats_str: String,
+    pub edit_course_price_str: String,
+    //
     pub show_lessons_modal: bool,
     pub editing_lessons_course: Option<Course>,
     pub course_lessons: Vec<LessonWithAssignments>,
@@ -74,13 +85,13 @@ pub struct App {
     pub new_group_name: String,
     pub new_group_course: Option<i32>,
     pub new_group_teacher: Option<i32>,
-    pub new_group_status: String,
+    pub new_group_status: GroupStatus,
 
     pub editing_group: Option<Group>,
     pub edit_group_name: String,
     pub edit_group_course: Option<i32>,
     pub edit_group_teacher: Option<i32>,
-    pub edit_group_status: String,
+    pub edit_group_status: GroupStatus,
 
     pub group_filter_text: String,
 
@@ -213,6 +224,12 @@ impl Default for App {
             edit_course_total_seats: 0,
             edit_course_seats: 0,
             edit_course_price: 0f64,
+            new_course_total_seats_str: "".to_string(),
+            new_course_seats_str: "".to_string(),
+            new_course_price_str: "".to_string(),
+            edit_course_total_seats_str: "".to_string(),
+            edit_course_seats_str: "".to_string(),
+            edit_course_price_str: "".to_string(),
             show_lessons_modal: false,
             editing_lessons_course: None,
             course_lessons: vec![],
@@ -232,12 +249,12 @@ impl Default for App {
             new_group_name: "".to_string(),
             new_group_course: None,
             new_group_teacher: None,
-            new_group_status: "".to_string(),
+            new_group_status: GroupStatus::Active,
             editing_group: None,
             edit_group_name: "".to_string(),
             edit_group_course: None,
             edit_group_teacher: None,
-            edit_group_status: "".to_string(),
+            edit_group_status: GroupStatus::Active,
             group_filter_text: "".to_string(),
             is_manage_students_modal_open: false,
             selected_student_to_add: None,
@@ -308,6 +325,44 @@ impl Default for App {
     }
 }
 
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)] // Copy позволит избежать лишних клонирований
+pub enum GroupStatus {
+    Active,
+    Inactive,
+}
+
+// Реализация Display для GroupStatus, чтобы PickList мог его отображать
+impl std::fmt::Display for GroupStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Мы используем `match` для преобразования варианта enum в строку,
+        // так как Rust по умолчанию не знает, как отображать enum как строку.
+        match self {
+            GroupStatus::Active => write!(f, "Активна"),
+            GroupStatus::Inactive => write!(f, "Неактивна"),
+        }
+    }
+}
+// Реализация FromSql для GroupStatus
+impl FromSql for GroupStatus {
+    fn column_result(value: ValueRef<'_>) -> Result<Self, FromSqlError> {
+        // Получаем значение из БД как строку
+        let s = value.as_str()?;
+        // Пытаемся сопоставить строку с вариантами нашего enum
+        match s {
+            "Активна" => Ok(GroupStatus::Active),
+            "Неактивна" => Ok(GroupStatus::Inactive),
+            _ => Err(FromSqlError::Other(format!("Неизвестный статус группы: {}", s).into())),
+        }
+    }
+}
+// Реализация ToSql для GroupStatus
+impl ToSql for GroupStatus {
+    fn to_sql(&self) -> Result<ToSqlOutput, rusqlite::Error> {
+        // Преобразуем наш enum в строку для записи в БД
+        Ok(self.to_string().into())
+    }
+}
 #[derive(Debug, Clone, PartialEq)]
 pub struct Certificate {
     pub id: i32,
@@ -385,7 +440,7 @@ pub struct Group {
     pub teacher_id: Option<i32>,      // Сохраняем ID преподавателя
     pub teacher_name: Option<String>, // Новое поле для имени преподавателя
     pub student_count: u8,
-    pub status: String,
+    pub status: GroupStatus,
 }
 
 impl fmt::Display for Group {

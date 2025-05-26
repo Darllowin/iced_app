@@ -332,48 +332,48 @@ pub fn courses_screen(app: &App) -> Container<Message> {
         let submit_message = if is_editing { Message::SubmitEditedCourse } else { Message::SubmitNewCourse };
         let cancel_message = if is_editing { Message::CancelEditingCourse } else { Message::ToggleAddCourseModal(false) };
 
-        let (title_val, desc_val, level_val, total_seats_val, seats_val, price_val, title_ch_msg, desc_ch_msg, level_ch_msg, total_seats_ch_msg, seats_ch_msg, price_ch_msg) : (
+        let (title_val, desc_val, level_val, total_seats_str_val, seats_str_val, price_str_val, title_ch_msg, desc_ch_msg, level_ch_msg, total_seats_ch_msg, seats_ch_msg, price_ch_msg) : (
             &String,
             &String,
             Option<Level>,
-            i32,
-            i32,
-            f64,
+            &String, 
+            &String, 
+            &String, 
             Box<dyn Fn(String) -> Message>,
             Box<dyn Fn(String) -> Message>,
             Box<dyn Fn(Level) -> Message>,
-            Box<dyn Fn(i32) -> Message>,
-            Box<dyn Fn(i32) -> Message>,
-            Box<dyn Fn(f64) -> Message>
+            Box<dyn Fn(String) -> Message>,
+            Box<dyn Fn(String) -> Message>, 
+            Box<dyn Fn(String) -> Message> 
         ) = if is_editing {
             (
                 &app.edit_course_title,
                 &app.edit_course_description,
                 Some(app.edit_course_level),
-                app.edit_course_total_seats,
-                app.edit_course_seats,
-                app.edit_course_price,
+                &app.edit_course_total_seats_str, 
+                &app.edit_course_seats_str,      
+                &app.edit_course_price_str,      
                 Box::new(Message::EditCourseTitleChanged),
                 Box::new(Message::EditCourseDescriptionChanged),
                 Box::new(Message::EditCourseLevelChanged),
-                Box::new(Message::EditCourseTotalSeatsChanged),
-                Box::new(Message::EditCourseSeatsChanged),
-                Box::new(Message::EditCoursePriceChanged),
+                Box::new(Message::EditCourseTotalSeatsChanged), 
+                Box::new(Message::EditCourseSeatsChanged),       
+                Box::new(Message::EditCoursePriceChanged),     
             )
         } else {
             (
                 &app.new_course_title,
                 &app.new_course_description,
                 Some(app.new_course_level),
-                app.new_course_total_seats,
-                app.new_course_seats,
-                app.new_course_price,
+                &app.new_course_total_seats_str, 
+                &app.new_course_seats_str,     
+                &app.new_course_price_str,   
                 Box::new(Message::NewCourseTitleChanged),
                 Box::new(Message::NewCourseDescriptionChanged),
                 Box::new(Message::NewCourseLevelChanged),
                 Box::new(Message::NewCourseTotalSeatsChanged),
-                Box::new(Message::NewCourseSeatsChanged),
-                Box::new(Message::NewCoursePriceChanged),
+                Box::new(Message::NewCourseSeatsChanged),    
+                Box::new(Message::NewCoursePriceChanged),    
             )
         };
 
@@ -382,9 +382,9 @@ pub fn courses_screen(app: &App) -> Container<Message> {
             .push(Text::new(modal_title_text).size(24))
             .push(TextInput::new("Название курса", title_val).on_input(move |s| title_ch_msg(s)))
             .push(TextInput::new("Описание курса", desc_val).on_input(move |s| desc_ch_msg(s)))
-            .push(TextInput::new("Запланированные в курсе", &total_seats_val.to_string()).on_input(move |s| total_seats_ch_msg(s.parse().unwrap_or(total_seats_val))))
-            .push(TextInput::new("Свободные места в курсе", &seats_val.to_string()).on_input(move |s| seats_ch_msg(s.parse().unwrap_or(seats_val))))
-            .push(TextInput::new("Цена курса", &price_val.to_string()).on_input(move |s| {price_ch_msg(s.parse().unwrap_or(price_val))}))
+            .push(TextInput::new("Запланированные в курсе", total_seats_str_val).on_input(move |s| total_seats_ch_msg(s)))
+            .push(TextInput::new("Свободные места в курсе", seats_str_val).on_input(move |s| seats_ch_msg(s)))
+            .push(TextInput::new("Цена курса", price_str_val).on_input(move |s| price_ch_msg(s)))
             .push(PickList::new(Level::ALL.to_vec(), level_val, move |level| level_ch_msg(level)).placeholder("Выберите уровень"))
             .push(Text::new(app.course_error_message.clone().unwrap_or_default()))
             .push(

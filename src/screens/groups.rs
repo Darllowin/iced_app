@@ -3,7 +3,7 @@ use iced::widget::{button, horizontal_space, image, row, text, PickList, Rule};
 use iced::widget::container::{background, bordered_box};
 use iced::widget::image::Handle;
 use crate::app::{App, Message};
-use crate::app::state::{Course, Group, UserInfo, DEFAULT_AVATAR};
+use crate::app::state::{Course, Group, GroupStatus, UserInfo, DEFAULT_AVATAR};
 
 fn headerbar(group: &Group) -> Row<'static, Message> {
     row![
@@ -76,7 +76,7 @@ pub fn groups_screen(app: &App) -> Container<Message> {
             Container::new(
                 Column::new()
                     .push(Container::new(headerbar(&group)).padding(10).style(move |_| bordered_box(&app.theme)))
-                    .push(Container::new(content(group, app)).style(move |_| bordered_box(&app.theme)))
+                    .push(Container::new(content(group.clone(), app)).style(move |_| bordered_box(&app.theme)))
             )
                 .padding(10)
                 .style(move |_| bordered_box(&app.theme))
@@ -228,11 +228,11 @@ pub fn groups_screen(app: &App) -> Container<Message> {
             &String,
             Option<Course>,
             Option<UserInfo>,
-            &String,
+            GroupStatus,
             Box<dyn Fn(String) -> Message>,
             Box<dyn Fn(Option<Course>) -> Message>,
             Box<dyn Fn(Option<UserInfo>) -> Message>,
-            Box<dyn Fn(String) -> Message>
+            Box<dyn Fn(GroupStatus) -> Message>
         ) = if is_editing {
             (
                 &app.edit_group_name,
@@ -242,7 +242,7 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                 app.edit_group_teacher.and_then(|teacher_id| {
                     app.users_for_picklist.iter().find(|u| u.id == teacher_id).cloned()
                 }),
-                &app.edit_group_status,
+                app.edit_group_status,
                 Box::new(Message::EditGroupNameChanged),
                 Box::new(Message::EditGroupCourseChanged),
                 Box::new(Message::EditGroupTeacherChanged),
@@ -257,13 +257,14 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                 app.new_group_teacher.and_then(|teacher_id| {
                     app.users_for_picklist.iter().find(|u| u.id == teacher_id).cloned()
                 }),
-                &app.new_group_status,
+                app.new_group_status,
                 Box::new(Message::NewGroupNameChanged),
                 Box::new(Message::NewGroupCourseChanged),
                 Box::new(Message::NewGroupTeacherChanged),
                 Box::new(Message::NewGroupStatusChanged),
             )
         };
+        let status_options = vec![GroupStatus::Active, GroupStatus::Inactive];
         let modal_column = Column::new().spacing(10).width(Length::Fill)
             .push(Text::new(modal_title).size(24))
             .push(TextInput::new("Название группы", name_value)
@@ -280,7 +281,11 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                     teacher_changed_msg(Some(user_selected_from_picklist))
                 },
             ).placeholder("Выберите преподавателя"))
-            .push(TextInput::new("Статус группы", status_selected_value).on_input(move |s| status_changed_msg(s)))
+            .push(PickList::new(
+                status_options, // Наши варианты статусов
+                Some(status_selected_value), // Текущее выбранное значение
+                move |status: GroupStatus| status_changed_msg(status), // Сообщение при изменении
+            ).placeholder("Выберите статус"))
             .push(Text::new(app.group_error_message.clone().unwrap_or_default()))
             .push(
                 Row::new()
@@ -379,7 +384,6 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                         Text::new("  Нет данных о посещаемости для этого занятия.").size(14)
                     );
                 }
-                // --- КОНЕЦ НОВОЙ ЛОГИКИ ---
 
                 lessons_col = lessons_col.push(
                     Container::new(session_detail_col) // Используем Column для деталей сессии

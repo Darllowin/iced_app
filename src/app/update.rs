@@ -346,16 +346,37 @@ impl App {
                 self.new_course_description = desc;
                 Task::none()
             }
-            Message::NewCourseTotalSeatsChanged(total_seats) => {
-                self.new_course_total_seats = total_seats;
+            Message::NewCourseTotalSeatsChanged(s) => {
+                self.new_course_total_seats_str = s;
+                // Попытка парсинга
+                if let Ok(value) = self.new_course_total_seats_str.parse::<i32>() {
+                    self.new_course_total_seats = value;
+                    self.course_error_message = None; // Очищаем ошибку, если парсинг успешен
+                } else {
+                    self.course_error_message = Some("Запланированные места должны быть целым числом.".to_string());
+                }
                 Task::none()
             }
-            Message::NewCourseSeatsChanged(seats) => {
-                self.new_course_seats = seats;
+            Message::NewCourseSeatsChanged(s) => {
+                self.new_course_seats_str = s;
+                if let Ok(value) = self.new_course_seats_str.parse::<i32>() {
+                    self.new_course_seats = value;
+                    self.course_error_message = None;
+                } else {
+                    self.course_error_message = Some("Свободные места должны быть целым числом.".to_string());
+                }
                 Task::none()
             }
-            Message::NewCoursePriceChanged(price) => {
-                self.new_course_price = price;
+            Message::NewCoursePriceChanged(s) => {
+                self.new_course_price_str = s.clone();
+                // Использование replace(',', '.') для поддержки как точки, так и запятой в качестве разделителя
+                let s_cleaned = s.replace(',', ".");
+                if let Ok(value) = s_cleaned.parse::<f64>() {
+                    self.new_course_price = value;
+                    self.course_error_message = None;
+                } else {
+                    self.course_error_message = Some("Цена должна быть числом (например, 123.45).".to_string());
+                }
                 Task::none()
             }
             Message::LoadStudentGroupInfo => {
@@ -467,7 +488,7 @@ impl App {
                 Task::none() // Возвращаем Task::none(), так как это конечный обработчик
             }
             Message::SubmitNewCourse => {
-                // Проверка на пустые поля
+                // Проверки на пустые поля
                 if self.new_course_title.is_empty() {
                     self.course_error_message = Some("Название курса не может быть пустым.".to_string());
                     return Task::none();
@@ -476,19 +497,40 @@ impl App {
                     self.course_error_message = Some("Описание курса не может быть пустым.".to_string());
                     return Task::none();
                 }
-                if self.new_course_seats.is_negative() || self.new_course_seats == 0 {
-                    self.course_error_message = Some("Недопустимое количество мест.".to_string());
+                // Проверка на ошибки парсинга, установленные ранее
+                if self.course_error_message.is_some() {
+                    // Если уже есть ошибка парсинга (например, введено нечисловое значение),
+                    // то не продолжаем.
                     return Task::none();
                 }
-                // Очищаем предыдущие ошибки, если они были
+                // Дополнительные логические проверки числовых значений
+                if self.new_course_total_seats <= 0 {
+                    self.course_error_message = Some("Запланированные места должны быть больше 0.".to_string());
+                    return Task::none();
+                }
+                if self.new_course_seats < 0 {
+                    self.course_error_message = Some("Свободные места не могут быть отрицательными.".to_string());
+                    return Task::none();
+                }
+                if self.new_course_seats > self.new_course_total_seats {
+                    self.course_error_message = Some("Свободные места не могут превышать запланированные.".to_string());
+                    return Task::none();
+                }
+                if self.new_course_price <= 0.0 {
+                    self.course_error_message = Some("Цена курса должна быть больше 0.".to_string());
+                    return Task::none();
+                }
+
+                // Если все проверки пройдены, очищаем сообщение об ошибке
                 self.course_error_message = None;
 
+                // Клонируем значения, которые будут перемещены в асинхронный блок
                 let new_course_title_clone = self.new_course_title.clone();
                 let new_course_description_clone = self.new_course_description.clone();
-                let new_course_seats_clone = self.new_course_seats.clone();
-                let new_course_total_seats = self.edit_course_total_seats;
-                let new_course_price_clone = self.new_course_price.clone();
                 let new_course_level_string = self.new_course_level.to_string(); // Преобразуем Level в String для БД
+                let new_course_seats_val = self.new_course_seats; // Берем само значение i32
+                let new_course_total_seats_val = self.new_course_total_seats; // Берем само значение i32
+                let new_course_price_val = self.new_course_price; // Берем само значение f64
 
                 // Очищаем поля формы после успешной проверки, но до выполнения Task
                 self.new_course_title.clear();
@@ -496,6 +538,12 @@ impl App {
                 self.new_course_level = Level::default(); // Сброс к дефолту. Используем Level::default()
                 self.new_course_seats = 0;
                 self.new_course_total_seats = 0;
+                self.new_course_price = 0.0; // Сброс цены
+
+                // Также очищаем строковые поля, чтобы они не сохраняли старые значения при повторном открытии модалки
+                self.new_course_total_seats_str.clear();
+                self.new_course_seats_str.clear();
+                self.new_course_price_str.clear();
 
                 self.show_add_course_modal = false; // Закрываем модалку
 
@@ -504,15 +552,24 @@ impl App {
                         spawn_blocking(move || {
                             let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
-                            // Вызов db::add_course скорректирован согласно его сигнатуре (Option<i32>, Option<&str>)
-                            db::add_course(&conn, &new_course_title_clone, &new_course_description_clone, Some(&new_course_level_string), new_course_seats_clone, new_course_price_clone, new_course_total_seats)
-                                .map_err(|e| format!("Ошибка добавления курса: {}", e))
+
+                            db::add_course(
+                                &conn,
+                                &new_course_title_clone,
+                                &new_course_description_clone,
+                                &new_course_level_string, // level уже String
+                                new_course_seats_val,     // i32
+                                new_course_price_val,     // f64
+                                new_course_total_seats_val // i32
+                            )
+                                .map_err(|e| format!("Ошибка добавления курса: {}", e))?;
+                            Ok(()) // Возвращаем Ok(()) если все успешно
                         }).await
                             .map_err(|join_err| format!("Ошибка выполнения задачи: {:?}", join_err))?
                     },
                     |result: Result<(), String>| {
                         match result {
-                            Ok(_) => Message::LoadAllCourses, // <--- ИСПРАВЛЕНО СООБЩЕНИЕ!
+                            Ok(_) => Message::LoadAllCourses, // Обновить список курсов
                             Err(e) => Message::ErrorOccurred(e),
                         }
                     }
@@ -538,6 +595,16 @@ impl App {
                 self.edit_course_total_seats = course.total_seats.clone().expect("REASON");
                 self.edit_course_seats = course.seats.clone().expect("REASON");
                 self.edit_course_price = course.price.clone().expect("REASON");
+                self.edit_course_total_seats_str = course.total_seats
+                    .map_or("0".to_string(), |val| val.to_string());
+                // .unwrap_or_default().to_string(); 
+
+                self.edit_course_seats_str = course.seats
+                    .map_or("0".to_string(), |val| val.to_string());
+                // .unwrap_or_default().to_string(); // Альтернативный вариант
+
+                self.edit_course_price_str = course.price
+                    .map_or("0.0".to_string(), |val| val.to_string());
                 self.editing_course = Some(course);
                 self.show_add_course_modal = true;
                 Task::none()
@@ -554,86 +621,146 @@ impl App {
                 self.edit_course_level = level;
                 Task::none()
             }
-            Message::EditCourseTotalSeatsChanged(total_seats) => {
-                self.edit_course_total_seats = total_seats;
+            Message::EditCourseTotalSeatsChanged(s) => {
+                self.edit_course_total_seats_str = s;
+                if let Ok(value) = self.edit_course_total_seats_str.parse::<i32>() {
+                    self.edit_course_total_seats = value;
+                    self.course_error_message = None;
+                } else {
+                    self.course_error_message = Some("Запланированные места должны быть целым числом.".to_string());
+                }
                 Task::none()
             }
-            Message::EditCourseSeatsChanged(seats) => {
-                self.edit_course_seats = seats;
+            Message::EditCourseSeatsChanged(s) => {
+                self.edit_course_seats_str = s;
+                if let Ok(value) = self.edit_course_seats_str.parse::<i32>() {
+                    self.edit_course_seats = value;
+                    self.course_error_message = None;
+                } else {
+                    self.course_error_message = Some("Свободные места должны быть целым числом.".to_string());
+                }
                 Task::none()
             }
-            Message::EditCoursePriceChanged(price) => {
-                self.edit_course_price = price;
+            Message::EditCoursePriceChanged(s) => {
+                self.edit_course_price_str = s.clone();
+                let s_cleaned = s.replace(',', ".");
+                if let Ok(value) = s_cleaned.parse::<f64>() {
+                    self.edit_course_price = value;
+                    self.course_error_message = None;
+                } else {
+                    self.course_error_message = Some("Цена должна быть числом (например, 123.45).".to_string());
+                }
                 Task::none()
             }
             Message::SubmitEditedCourse => {
-                // Эта операция должна быть асинхронной
-                if let Some(original_course) = &self.editing_course {
-
-                    if self.edit_course_title.is_empty() {
-                        self.course_error_message = Some("Название курса не может быть пустым.".to_string());
-                        return Task::none();
-                    }
-                    if self.edit_course_description.is_empty() {
-                        self.course_error_message = Some("Описание курса не может быть пустым.".to_string());
-                        return Task::none();
-                    }
-                    if self.edit_course_seats.is_negative() {
-                        self.course_error_message = Some("Недопустимое количество мест.".to_string());
-                        return Task::none();
-                    }
-                    if self.edit_course_seats == 0 {
-                        self.course_error_message = Some("Недопустимое количество мест.".to_string());
-                        return Task::none();
-                    }
-                    if self.edit_course_price == 0.0 {
-                        self.course_error_message = Some("Недопустимая цена.".to_string());
-                        return Task::none();
-                    }
-                    if self.edit_course_price.is_sign_negative() {
-                        self.course_error_message = Some("Недопустимая цена.".to_string());
-                        return Task::none();
-                    }
-                    if self.edit_course_total_seats == 0 {
-                        self.course_error_message = Some("Недопустимое количество мест.".to_string());
-                        return Task::none();
-                    }
-                    if self.edit_course_total_seats.is_negative() {
-                        self.course_error_message = Some("Недопустимая цена.".to_string());
-                        return Task::none();
-                    }
-
-                    let conn = Connection::open(PATH_TO_DB).unwrap();
-
-                    let updated_course = Course {
-                        id: original_course.id,
-                        title: self.edit_course_title.clone(),
-                        description: Some(self.edit_course_description.clone()),
-                        level: Some(self.edit_course_level.to_string()),
-                        lesson_count: original_course.lesson_count,
-                        total_seats: Some(self.edit_course_total_seats),
-                        seats: Some(self.edit_course_seats),
-                        price: Some(self.edit_course_price),
-                    };
-
-                    if db::update_course(&conn, &updated_course).is_ok() {
-                        self.show_add_course_modal = false;
-                        self.editing_course = None;
-                        self.edit_course_title.clear();
-                        self.edit_course_description.clear();
-                        // Очищаем поля, связанные с преподавателем, как мы их назвали
-                        self.edit_course_teacher_id = None; // <--- Очищаем ID
-                        // self.edit_course_instructor_name = None; // Если такое поле есть в App и вы его очищаете
-                        self.edit_course_level = Level::Beginner;
-                        self.edit_course_total_seats = 0;
-                        self.edit_course_seats = 0;
-                        self.edit_course_price = 0.0;
-                    } else {
-                        self.error_message = "Ошибка сохранения курса.".to_string();
-                    }
+                // Эта операция ДОЛЖНА быть асинхронной.
+                // Проверки на пустые поля и логические проверки
+                if self.edit_course_title.is_empty() {
+                    self.course_error_message = Some("Название курса не может быть пустым.".to_string());
+                    return Task::none();
                 }
-                Task::none() // Возвращаем Task::none()
+                if self.edit_course_description.is_empty() {
+                    self.course_error_message = Some("Описание курса не может быть пустым.".to_string());
+                    return Task::none();
+                }
+                // Проверка на ошибки парсинга, установленные ранее в *Changed сообщениях
+                if self.course_error_message.is_some() {
+                    // Если уже есть ошибка парсинга (например, введено нечисловое значение),
+                    // то не продолжаем.
+                    return Task::none();
+                }
+                // Дополнительные логические проверки числовых значений, которые уже распарсены
+                if self.edit_course_total_seats <= 0 { // Теперь это соответствует вашей предыдущей логике
+                    self.course_error_message = Some("Запланированные места должны быть больше 0.".to_string());
+                    return Task::none();
+                }
+                if self.edit_course_seats < 0 {
+                    self.course_error_message = Some("Свободные места не могут быть отрицательными.".to_string());
+                    return Task::none();
+                }
+                if self.edit_course_seats > self.edit_course_total_seats {
+                    self.course_error_message = Some("Свободные места не могут превышать запланированные.".to_string());
+                    return Task::none();
+                }
+                if self.edit_course_price <= 0.0 {
+                    self.course_error_message = Some("Цена курса должна быть больше 0.".to_string());
+                    return Task::none();
+                }
+
+                // Если все проверки пройдены, очищаем сообщение об ошибке
+                self.course_error_message = None;
+
+
+                // Клонируем значения для перемещения в асинхронный блок
+                let original_course_id = self.editing_course.as_ref().map(|c| c.id);
+
+                // Получите значения, которые редактировались в состоянии UI
+                let edited_course_title = self.edit_course_title.clone();
+                let edited_course_description = self.edit_course_description.clone(); // Теперь это String
+                let edited_course_level = self.edit_course_level.to_string(); // Level enum в String
+                let edited_course_total_seats = self.edit_course_total_seats; // i32
+                let edited_course_seats = self.edit_course_seats;             // i32
+                let edited_course_price = self.edit_course_price;             // f64
+
+                // Вам нужно убедиться, что другие поля Course доступны или имеют значения по умолчанию,
+                // если они не редактируются в этом модальном окне.
+                // Например, если Course имеет 'lesson_count', но оно не редактируется:
+                let original_lesson_count = self.editing_course.as_ref().map(|c| c.lesson_count).unwrap_or(0); // Предоставьте значение по умолчанию, если None/не найдено
+
+
+                // Очистите поля UI и сбросьте состояние редактирования ДО асинхронной задачи
+                self.edit_course_title.clear();
+                self.edit_course_description.clear();
+                self.edit_course_level = Level::default();
+                self.edit_course_total_seats = 0;
+                self.edit_course_seats = 0;
+                self.edit_course_price = 0.0;
+                self.edit_course_total_seats_str.clear();
+                self.edit_course_seats_str.clear();
+                self.edit_course_price_str.clear();
+
+                self.editing_course = None;
+                self.show_add_course_modal = false;
+
+
+                // Запустите асинхронную операцию
+                Task::perform(
+                    async move {
+                        // Убедитесь, что course_id существует (из original_course_id, захваченного ранее)
+                        let course_id_val = original_course_id
+                            .ok_or_else(|| "Ошибка: ID редактируемого курса не найден.".to_string())?;
+
+                        // --- Создайте экземпляр структуры Course здесь ---
+                        let updated_course_data = Course {
+                            id: course_id_val, // Используйте ID из исходного курса
+                            title: edited_course_title,
+                            description: Some(edited_course_description),
+                            level: Some(edited_course_level),
+                            lesson_count: original_lesson_count, // Это, вероятно, не Option, так что оставляем как есть
+                            total_seats: Some(edited_course_total_seats),
+                            seats: Some(edited_course_seats),
+                            price: Some(edited_course_price),         // Теперь это f64, а не Option<f64>
+                        };
+
+                        spawn_blocking(move || {
+                            let conn = Connection::open(PATH_TO_DB)
+                                .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
+
+                            // Вызовите db::update_course с новым экземпляром Course
+                            db::update_course(&conn, &updated_course_data) // Передайте &updated_course_data
+                                .map_err(|e| format!("Ошибка обновления курса: {}", e))
+                        }).await
+                            .map_err(|join_err| format!("Ошибка выполнения задачи: {:?}", join_err))?
+                    },
+                    |result: Result<(), String>| {
+                        match result {
+                            Ok(_) => Message::LoadAllCourses,
+                            Err(e) => Message::ErrorOccurred(e),
+                        }
+                    }
+                )
             }
+
             Message::CancelEditingCourse => {
                 self.show_add_course_modal = false;
                 self.editing_course = None;
@@ -930,10 +1057,6 @@ impl App {
                     self.group_error_message = Some("Название группы не может быть пустым.".to_string());
                     return Task::none();
                 }
-                if self.edit_group_status.is_empty() {
-                    self.group_error_message = Some("Статус группы не может быть пустым.".to_string());
-                    return Task::none();
-                }
                 if self.edit_group_course.is_none() {
                     self.group_error_message = Some("Необходимо выбрать курс для группы.".to_string());
                     return Task::none();
@@ -954,7 +1077,7 @@ impl App {
                 let group_name_clone = self.edit_group_name.clone();
                 let group_course_id = self.edit_group_course.unwrap_or_default(); // ID курса (уже i32)
                 let group_teacher_id = self.edit_group_teacher.unwrap_or_default(); // ID преподавателя (уже i32)
-                let group_status_clone = self.edit_group_status.clone();
+                let group_status_string = self.edit_group_status;
 
                 // Очищаем поля ввода и сбрасываем состояние редактирования до выполнения Task
                 self.edit_group_name.clear();
@@ -969,7 +1092,7 @@ impl App {
                         spawn_blocking(move || {
                             let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
-                            db::update_group(&conn, group_id, &group_name_clone, group_course_id, group_teacher_id, &group_status_clone)
+                            db::update_group(&conn, group_id, &group_name_clone, group_course_id, group_teacher_id, group_status_string)
                                 .map_err(|e| format!("Ошибка обновления группы: {}", e))?;
                             Ok(()) // Возвращаем Ok(()) если все успешно
                         }).await
@@ -1005,7 +1128,7 @@ impl App {
                 // ИСПРАВЛЕНО: Просто unwrap() для Option<i32>
                 let group_course_id = self.new_group_course.unwrap(); // new_group_course имеет тип Option<i32>
                 let group_teacher_id = self.new_group_teacher.unwrap(); // new_group_teacher имеет тип Option<i32>
-                let group_status_clone = self.new_group_status.clone();
+                let group_status_string = self.new_group_status;
 
                 // Очищаем поля ввода до выполнения Task
                 self.new_group_name.clear();
@@ -1020,7 +1143,7 @@ impl App {
                             let conn = Connection::open(PATH_TO_DB)
                                 .map_err(|e| format!("Не удалось открыть БД: {}", e))?;
                             // Вызов функции БД теперь корректен с i32
-                            db::insert_group(&conn, &group_name_clone, group_course_id, group_teacher_id, &group_status_clone)
+                            db::insert_group(&conn, &group_name_clone, group_course_id, group_teacher_id, group_status_string)
                                 .map_err(|e| format!("Ошибка добавления группы: {}", e))?;
                             Ok(()) // Возвращаем Ok(()) если все успешно
                         }).await
@@ -1066,7 +1189,7 @@ impl App {
                 self.show_group_students_modal = true;
                 self.current_manage_students_group_id = Some(group_id); // Сохраняем ID текущей группы
 
-                if let Some(group) = self.teacher_groups.iter().find(|g| g.id == group_id) {
+                if let Some(group) = self.all_groups.iter().find(|g| g.id == group_id) {
                     self.selected_group_for_students_name = Some(group.name.clone());
                     println!("DEBUG: Имя группы для модального окна: {}", group.name);
                 } else {
@@ -2000,7 +2123,7 @@ impl App {
                 self.group_lessons_modal_past_sessions.clear();
 
                 // Ищем название группы для заголовка модального окна
-                if let Some(group_found) = self.teacher_groups.iter().find(|g| g.id == group_id) {
+                if let Some(group_found) = self.all_groups.iter().find(|g| g.id == group_id) {
                     self.group_lessons_modal_group_name = group_found.name.clone();
                 } else {
                     self.group_lessons_modal_group_name = "Неизвестная группа".to_string();
@@ -2612,7 +2735,7 @@ async fn load_teacher_groups(teacher_email: String) -> Result<Vec<Group>, String
 pub fn generate_certificate_html(
     cert: &Certificate,
     student: &UserInfo,
-    output_path: &std::path::Path,
+    output_path: &Path,
 ) -> std::io::Result<()> {
     let html_content = format!(
         r#"<!DOCTYPE html>

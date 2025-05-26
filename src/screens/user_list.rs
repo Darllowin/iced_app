@@ -1,11 +1,11 @@
-use iced::{Color, ContentFit};
+use iced::{Color, ContentFit, Theme}; // Добавляем Theme
 use iced::{
     widget::{Button, Column, Container, Row, Stack, Text, TextInput, mouse_area, Scrollable},
     Alignment, Length
 };
 use iced::advanced::image::Handle;
 use iced::widget::container::{background, bordered_box};
-use iced::widget::{horizontal_space, image, text, PickList};
+use iced::widget::{horizontal_space, image, text, PickList, Rule, button as button_widget}; // Импортируем button как button_widget, чтобы не конфликтовать с Button
 use crate::app::{App, Message};
 use crate::app::state::{DEFAULT_AVATAR, PATH_TO_DB};
 use crate::db;
@@ -17,7 +17,7 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
     let mut list = Column::new().spacing(15);
 
     let filter_options = vec![
-        "Все".to_string(), // Option to show all users
+        "Все".to_string(),
         "student".to_string(),
         "parent".to_string(),
         "admin".to_string(),
@@ -30,9 +30,9 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
         Some(current_filter_selection),
         |selection| {
             if selection == "Все" {
-                Message::UserTypeFilterChanged(None) // If "All" selected, set filter to None
+                Message::UserTypeFilterChanged(None)
             } else {
-                Message::UserTypeFilterChanged(Some(selection)) // Otherwise, use the selected type
+                Message::UserTypeFilterChanged(Some(selection))
             }
         },
     )
@@ -47,20 +47,25 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
         .padding([0, 20]);
 
     for user in users {
-        let avatar = if let Some(mut data) = user.avatar_data.clone() {
-            data.extend_from_slice(user.email.as_bytes()); // Для уникальности
-            let image_handle = Handle::from_bytes(data);
+        let avatar_user_list = Container::new(
+            if let Some(mut data) = user.avatar_data.clone() {
+                data.extend_from_slice(user.email.as_bytes());
+                let image_handle = Handle::from_bytes(data);
 
-            image(image_handle)
-                .width(Length::Fixed(120.0))
-                .height(Length::Fixed(120.0))
-                .content_fit(ContentFit::Fill)
-        } else {
-            image(DEFAULT_AVATAR)
-                .width(Length::Fixed(120.0))
-                .height(Length::Fixed(120.0))
-                .content_fit(ContentFit::Cover)
-        };
+                image(image_handle)
+                    .width(Length::Fixed(120.0))
+                    .height(Length::Fixed(120.0))
+                    .content_fit(ContentFit::Cover)
+            } else {
+                image(DEFAULT_AVATAR)
+                    .width(Length::Fixed(120.0))
+                    .height(Length::Fixed(120.0))
+                    .content_fit(ContentFit::Cover)
+            }
+        )
+            .width(Length::Fixed(120.0))
+            .height(Length::Fixed(120.0))
+            .clip(true);
 
         let header = Row::new()
             .push(
@@ -84,45 +89,38 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
             .push(Text::new(format!("Email: {}", user.email)))
             .push(Text::new(format!("Дата рождения: {}", user.birthday)))
             .push(Text::new(format!("Тип: {}", user.user_type)));
-        
+
         if user.user_type == "student".to_string() {
-            if let Some(group_names) = &user.group_id { // child.group теперь Option<String> из БД
-                // Отображаем строку с именами групп
+            if let Some(group_names) = &user.group_id {
                 info = info.push(Text::new(format!("Группа: {}", group_names)));
             } else {
-                // Если у ребенка нет групп
                 info = info.push(Text::new("Группа: не указана"));
             }
         }
 
         if user.user_type == "teacher".to_string() {
-            if let Some(group_names) = &user.group_id { // child.group теперь Option<String> из БД
-                // Отображаем строку с именами групп
+            if let Some(group_names) = &user.group_id {
                 info = info.push(Text::new(format!("Группа: {}", group_names)));
             } else {
-                // Если у ребенка нет групп
                 info = info.push(Text::new("Группа: не указана"));
             }
         }
 
         if user.user_type == "parent" {
-            // user.child_count - это Option<i32> из БД
             if let Some(count) = user.child_count {
-                // Отображаем количество, если оно > 0
                 if count > 0 {
                     info = info.push(Text::new(format!("Количество детей: {}", count)));
-                } 
+                }
             } else {
-                // Этот случай должен быть редким для parent, но на всякий случай
                 info = info.push(Text::new("Детей: нет данных"));
             }
         }
-        
+
         let user_info_widget = Container::new(
             Row::new()
                 .padding(10)
                 .spacing(20)
-                .push(avatar)
+                .push(avatar_user_list)
                 .push(info)
         ).style(move |_| bordered_box(&app.theme)).width(Length::Fill);
 
@@ -140,15 +138,17 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
         .width(Length::Fill)
         .height(Length::Fill);
 
-    let base = Container::new(
+    let base_ui = Container::new(
         Column::new().push(filter_row.padding(10)).push(scrollable)
     )
         .align_y(Alignment::Start)
         .width(Length::Fill)
         .height(Length::Fill);
 
+    let mut current_ui_stack = Stack::new().push(base_ui);
+
     // Модалка редактирования пользователя
-    let ui_with_edit_modal = if app.show_edit_user_modal {
+    if app.show_edit_user_modal {
         let mut modal_content = Column::new()
             .spacing(10)
             .push(Text::new("Редактировать пользователя").size(24))
@@ -176,108 +176,143 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
 
         let modal_overlay = Container::new(
             mouse_area(Container::new(modal).center(Length::Fill).padding(40))
-                .on_press(Message::Er("".to_string()))
+                .on_press(Message::CancelEditingUser)
         )
             .width(Length::Fill)
             .height(Length::Fill)
             .style(move |_| background(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.7 }));
 
-        Container::new(Stack::new().push(base).push(modal_overlay))
-    } else {
-        base
-    };
+        current_ui_stack = current_ui_stack.push(modal_overlay);
+    }
 
-    // Модалка детей
+    // Модалка детей 
     if app.show_children_modal {
-        let mut children_list = app.parent_children.iter().fold(Column::new().spacing(10).width(Length::Fill), |col, child| {
-            let avatar = Container::new(
-                if let Some(mut data) = child.avatar_data.clone() {
+        // Заголовок модального окна, можно получить из имени родителя или типа "Список детей"
+        let modal_title_text = "Список детей";
+
+        let mut children_list_col: Column<'_, Message, Theme> = Column::new().spacing(5);
+
+        // Проверяем, есть ли дети для отображения
+        if app.parent_children.is_empty() {
+            children_list_col = children_list_col.push(
+                Text::new("У этого пользователя нет детей.").size(16)
+            );
+        } else {
+            for child in &app.parent_children {
+                let avatar_widget_child = if let Some(mut data) = child.avatar_data.clone() {
                     data.extend_from_slice(child.email.as_bytes());
                     let image_handle = Handle::from_bytes(data);
 
                     image(image_handle)
                         .width(Length::Fixed(100.0))
                         .height(Length::Fixed(100.0))
-                        .content_fit(ContentFit::Cover)
+                        .content_fit(ContentFit::Fill) // или Fill, как в примере со студентами
                 } else {
                     image(DEFAULT_AVATAR)
                         .width(Length::Fixed(100.0))
                         .height(Length::Fixed(100.0))
-                        .content_fit(ContentFit::Cover)
-                }
-            )
-                .width(Length::Fixed(100.0))
-                .height(Length::Fixed(100.0));
+                        .content_fit(ContentFit::Fill)
+                };
 
-            let info = Column::new()
-                .spacing(5)
-                .width(Length::Fill)
-                .push(Text::new(&child.name).size(18))
-                .push(Text::new(format!("Email: {}", &child.email)))
-                .push(Text::new(format!("Дата рождения: {}", &child.birthday)))
-                .push(
-                    if let Some(group_names) = &child.group_id {
-                        // Отображаем строку с именами групп
-                        Text::new(format!("Группа: {}", group_names))
-                    } else {
-                        // Если у студента нет групп
-                        Text::new("Группа: не указана")
-                    }
+                // Оборачиваем виджет изображения в контейнер с обрезкой
+                let avatar_container_child = Container::new(avatar_widget_child)
+                    .width(Length::Fixed(100.0))
+                    .height(Length::Fixed(100.0))
+                    .clip(true); // <--- Это ключевой момент для обрезки
+
+                let info = Column::new()
+                    .spacing(5)
+                    .width(Length::Fill)
+                    .push(Text::new(format!("ФИО: {}", &child.name)).size(18)) // Как в примере со студентами
+                    .push(Text::new(format!("Email: {}", &child.email)))
+                    .push(Text::new(format!("Дата рождения: {}", &child.birthday)))
+                    .push(
+                        if let Some(group_names) = &child.group_id {
+                            Text::new(format!("Группа: {}", group_names))
+                        } else {
+                            Text::new("Группа: не указана")
+                        }
+                    );
+
+                let row = Row::new()
+                    .padding(10) // Padding для каждого элемента списка, как в примере со студентами
+                    .width(Length::Fill)
+                    .spacing(10)
+                    .align_y(Alignment::Center)
+                    .push(avatar_container_child)
+                    .push(info)
+                    .push(horizontal_space()) // Для выравнивания кнопки справа
+                    .push(
+                        button_widget(Text::new("Удалить")) // Используем button_widget из-за конфликта имен
+                            .on_press(Message::DeleteChild {
+                                parent_email: app.edit_user_email.clone(), // Полагаемся на email родителя
+                                child_email: child.email.clone(),
+                            })
+                    );
+
+                children_list_col = children_list_col.push(
+                    Container::new(row)
+                        .style(move |_| bordered_box(&app.theme))
+                        .width(Length::Fill)
                 );
-
-            let row = Row::new()
-                .spacing(10)
-                .align_y(Alignment::Center)
-                .width(Length::Fill)
-                .push(avatar)
-                .push(info)
-                .push(Button::new(Text::new("X")).on_press(Message::DeleteChild {
-                    parent_email: app.edit_user_email.clone(),
-                    child_email: child.email.clone(),
-                }));
-
-            col.push(Container::new(row).style(move |_| bordered_box(&app.theme)).padding(10).width(Length::Fill))
-        });
-
-        if app.parent_children.is_empty() {
-            children_list = children_list.push(Text::new("Нет детей."));
+            }
         }
 
-        let picklist = PickList::new(
-            &app.available_children[..],
-            app.selected_child_to_add.clone(),
-            Message::SelectedChildToAddChanged,
-        )
-            .placeholder("Выберите ребёнка");
+        let scrollable_children = Scrollable::new(
+            Container::new(children_list_col).padding(5) // Padding для контейнера внутри скролла
+        ).height(Length::FillPortion(1)); // Высота, как в примере со студентами
 
-        let add_button = Button::new(Text::new("Добавить"))
-            .on_press(Message::AddChildToParent);
-
-        let add_row = Row::new().spacing(10).push(picklist).push(add_button);
+        // Логика добавления ребенка
+        let add_child_row = Row::new()
+            .spacing(10)
+            .align_y(Alignment::Center)
+            .push(Text::new("Добавить ребенка:").size(18))
+            .push(
+                PickList::new(
+                    app.available_children.clone(), // Список доступных детей
+                    app.selected_child_to_add.clone(),
+                    Message::SelectedChildToAddChanged,
+                ).placeholder("Выберите ребенка")
+            )
+            .push(
+                button_widget(Text::new("Добавить"))
+                    .on_press(Message::AddChildToParent) // Убедитесь, что это сообщение обрабатывается
+                    .width(Length::Shrink)
+            );
 
         let modal_content = Column::new()
             .spacing(15)
-            .push(Text::new("Список детей").size(24))
-            .push(Scrollable::new(children_list).height(Length::Fixed(400.0)))
-            .push(add_row)
-            .push(Button::new(Text::new("Закрыть")).on_press(Message::CloseParentChildrenModal));
+            .align_x(Alignment::Start) // Выравнивание по левому краю
+            .push(Text::new(modal_title_text).size(22))
+            .push(scrollable_children)
+            .push(Rule::horizontal(10)) // Разделитель
+            .push(add_child_row)
+            .push(Text::new(app.edit_user_error.clone().unwrap_or_default()).color(Color::from_rgb(1.0, 0.0, 0.0))) // Если есть специфичная ошибка для этой модалки, используйте ее
+            .push(
+                button_widget(Text::new("Закрыть"))
+                    .on_press(Message::CloseParentChildrenModal)
+            );
 
-        let modal = Container::new(modal_content)
+        let modal_container = Container::new(modal_content)
             .style(move |_| bordered_box(&app.theme))
             .padding(20)
-            .height(Length::Fixed(600.0))
-            .width(Length::Fixed(900.0));
+            .height(Length::Fixed(600.0)) // Увеличил высоту, чтобы было место для всего
+            .width(Length::Fixed(900.0)); // Увеличил ширину для содержимого
 
         let modal_overlay = Container::new(
-            mouse_area(Container::new(modal).center(Length::Fill).padding(40))
-                .on_press(Message::Er("".to_string()))
+            mouse_area(Container::new(modal_container).center(Length::Fill))
+                .on_press(Message::CloseParentChildrenModal) // Закрытие по клику вне модалки
         )
-            .width(Length::Fill)
-            .height(Length::Fill)
+            .width(Length::Fill).height(Length::Fill)
+            .center_y(Length::Fill) // Добавлено явное центрирование
+            .center_x(Length::Fill) // Добавлено явное центрирование
             .style(move |_| background(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.7 }));
 
-        Container::new(Stack::new().push(ui_with_edit_modal).push(modal_overlay))
-    } else {
-        ui_with_edit_modal
+        current_ui_stack = current_ui_stack.push(modal_overlay);
     }
+
+    // Возвращаем итоговый стек UI
+    Container::new(current_ui_stack)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
 }

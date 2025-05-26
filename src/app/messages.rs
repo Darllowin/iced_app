@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use iced_aw::date_picker::Date;
-use crate::app::state::{Assignment, AssignmentType, Certificate, Course, CoursePickListItem, Group, GroupPickListItem, LessonWithAssignments, Level, PastSession, Payment, StudentAttendance, StudentPickListItem, TextInputOrEditorInput, UserInfo};
+use crate::app::state::{Assignment, AssignmentType, Certificate, Course, CoursePickListItem, Group, GroupPickListItem, GroupStatus, LessonWithAssignments, Level, PastSession, Payment, StudentAttendance, StudentPickListItem, TextInputOrEditorInput, UserInfo};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -41,9 +41,10 @@ pub enum Message {
     ToggleAddCourseModal(bool),
     NewCourseTitleChanged(String),
     NewCourseDescriptionChanged(String),
-    NewCourseTotalSeatsChanged(i32),
-    NewCourseSeatsChanged(i32),
-    NewCoursePriceChanged(f64),
+    NewCourseTotalSeatsChanged(String),
+    NewCourseSeatsChanged(String),
+    NewCoursePriceChanged(String),
+
     SubmitNewCourse,
     DeleteCourse(i32),
     // Редактирование курса
@@ -51,9 +52,9 @@ pub enum Message {
     EditCourseTitleChanged(String),
     EditCourseDescriptionChanged(String),
     EditCourseLevelChanged(Level),
-    EditCourseTotalSeatsChanged(i32),
-    EditCourseSeatsChanged(i32),
-    EditCoursePriceChanged(f64),
+    EditCourseTotalSeatsChanged(String),
+    EditCourseSeatsChanged(String),
+    EditCoursePriceChanged(String),
     SubmitEditedCourse,
     CancelEditingCourse,
     // Редактирование пользователя
@@ -74,12 +75,12 @@ pub enum Message {
     NewGroupNameChanged(String),
     NewGroupCourseChanged(Option<Course>),
     NewGroupTeacherChanged(Option<UserInfo>),
-    NewGroupStatusChanged(String),
+    NewGroupStatusChanged(GroupStatus),
 
     EditGroupNameChanged(String),
     EditGroupCourseChanged(Option<Course>),
     EditGroupTeacherChanged(Option<UserInfo>),
-    EditGroupStatusChanged(String),
+    EditGroupStatusChanged(GroupStatus),
 
     SubmitNewGroup,
     SubmitEditedGroup,

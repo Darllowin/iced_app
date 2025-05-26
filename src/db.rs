@@ -5,7 +5,7 @@ use image::ImageReader;
 use rusqlite::{params, Connection, OptionalExtension, Result, Error, ffi, Transaction, params_from_iter};
 use serde::de::StdError;
 use tokio::task;
-use crate::app::state::{Assignment, Certificate, Course, Group, LessonWithAssignments, PastSession, Payment, StudentAttendanceStatus, UserInfo, PATH_TO_DB};
+use crate::app::state::{Assignment, Certificate, Course, Group, GroupStatus, LessonWithAssignments, PastSession, Payment, StudentAttendanceStatus, UserInfo, PATH_TO_DB};
 
 
 pub async fn authenticate_and_get_user_data(
@@ -203,7 +203,7 @@ pub fn get_courses(conn: &Connection) -> Result<Vec<Course>> {
     Ok(course_iter.collect::<Result<Vec<_>>>()?)
 }
 
-pub fn add_course(conn: &Connection, title: &str, description: &str, level: Option<&str>, seats: i32, price: f64, total_seats: i32) -> Result<()> {
+pub fn add_course(conn: &Connection, title: &str, description: &str, level: &String, seats: i32, price: f64, total_seats: i32) -> Result<()> {
     conn.execute(
         "INSERT INTO Course (title, description, level, seats, price, total_seats) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
@@ -267,15 +267,14 @@ pub fn get_all_users(conn: &Connection) -> Result<Vec<UserInfo>> {
 }
 pub fn update_course(conn: &Connection, course: &Course) -> Result<()> {
     conn.execute(
-        // Используем course.instructor_id напрямую, без подзапроса по имени
-        "UPDATE Course SET title = ?1, description = ?2, level = ?3, total_seats = ?4, seats = ?5, price =?6 WHERE ID = ?7",
+        "UPDATE Course SET title = ?1, description = ?2, level = ?3, total_seats = ?4, seats = ?5, price = ?6 WHERE ID = ?7",
         params![
             course.title,
-            course.description,
-            course.level.as_deref(),
-            course.total_seats,
-            course.seats,
-            course.price,
+            course.description, // Если description: Option<String>
+            course.level,       // Если level: Option<String> ИЛИ Level enum с ToSql
+            course.total_seats, // Если total_seats: Option<i32>
+            course.seats,       // Если seats: Option<i32>
+            course.price,       // Если price: Option<f64>
             course.id
         ],
     )?;
@@ -620,7 +619,7 @@ pub fn get_students_without_group(conn: &Connection) -> Result<Vec<UserInfo>> {
     println!("DEBUG DB: Загружено студентов без группы: {} шт.", students.len());
     Ok(students)
 }
-pub fn insert_group(conn: &Connection, name: &str, course_id: i32, teacher_id: i32, status: &str) -> Result<()> {
+pub fn insert_group(conn: &Connection, name: &str, course_id: i32, teacher_id: i32, status: GroupStatus) -> Result<()> {
     conn.execute(
         "INSERT INTO `Group` (name, course_id, teacher_id, student_count, status) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![name, course_id, teacher_id, 0, status],
@@ -628,7 +627,7 @@ pub fn insert_group(conn: &Connection, name: &str, course_id: i32, teacher_id: i
     Ok(())
 }
 
-pub fn update_group(conn: &Connection, id: i32, name: &str, course_id: i32, teacher_id: i32, status: &str) -> Result<()> {
+pub fn update_group(conn: &Connection, id: i32, name: &str, course_id: i32, teacher_id: i32, status: GroupStatus) -> Result<()> {
     conn.execute(
         "UPDATE \"Group\" SET name = ?, course_id = ?, teacher_id = ?, status = ? WHERE id = ?",
         params![name, course_id, teacher_id, status, id],
@@ -1380,7 +1379,7 @@ pub fn get_students_with_certificates_info(conn: &Connection) -> Result<Vec<User
             user_type: row.get("Type")?, // Используем "Type" из БД
             avatar_data: row.get("AvatarData")?,
             group_id: None, // Не получаем здесь информацию о группе
-            child_count: row.get("certificate_count").ok(), // Используем certificate_count как child_count временно для удобства, либо добавьте отдельное поле в UserInfo если часто нужно (например, `cert_count: Option<i32>`)
+            child_count: row.get("certificate_count").ok(), 
         })
     })?;
 
