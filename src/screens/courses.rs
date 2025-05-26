@@ -271,15 +271,7 @@ pub fn courses_screen(app: &App) -> Container<Message> {
                             .on_action(|action| Message::EditingAssignmentDescriptionChanged(TextInputOrEditorInput::TextEditor(action)))
                         ).height(Length::Fixed(300.0))
                     );
-            } else if *assignment_type_str == AssignmentType::Test.to_string() {
-                content_specific_to_type = content_specific_to_type
-                    .push(Text::new("Общее описание/инструкции к тесту:").size(16))
-                    // *** ИЗМЕНЕНО: Используем поле для TextInput и оборачиваем ввод ***
-                    .push(TextInput::new("Введите описание...", &app.editing_assignment_description_text_input) // Привязываем к TextInput String полю
-                        // Используем on_input и оборачиваем в TextInputOrEditorInput::TextInput
-                        .on_input(|s| Message::EditingAssignmentDescriptionChanged(TextInputOrEditorInput::TextInput(s))))
-                    .push(Rule::horizontal(5))
-                    .push(Text::new("Примечание: Детальное создание вопросов и ответов для тестов будет доступно в следующих версиях.").size(14));
+             
             } else {
                 // Для неизвестных или других типов просто показываем описание
                 content_specific_to_type = content_specific_to_type

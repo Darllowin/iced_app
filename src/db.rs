@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::Cursor;
+use chrono::NaiveDate;
 use image::imageops::FilterType;
 use image::ImageReader;
 use rusqlite::{params, Connection, OptionalExtension, Result, Error, ffi, Transaction, params_from_iter};
@@ -227,15 +228,14 @@ pub fn delete_course(conn: &Connection, course_id: i32) -> Result<()> {
 pub fn get_all_users(conn: &Connection) -> Result<Vec<UserInfo>> {
     let mut stmt = conn.prepare("
         SELECT
-            ID,          -- Совпадает
-            Name,        -- Исправлен регистр
-            Email,       -- Исправлен регистр
-            Birthday,    -- Исправлен регистр
-            Type,        -- Исправлено имя колонки (было user_type)
-            AvatarData   -- Исправлен регистр
-            -- `group` и child_count отсутствуют в схеме Users, поэтому убраны из запроса
+            ID,          
+            Name,        
+            Email,       
+            Birthday,    
+            Type,        
+            AvatarData  
         FROM Users
-        ORDER BY Name   -- Исправлен регистр для ORDER BY
+        ORDER BY Name
     ")?;
 
     let users_result: Result<Vec<UserInfo>> = stmt.query_map(params![], |row| {
@@ -270,11 +270,11 @@ pub fn update_course(conn: &Connection, course: &Course) -> Result<()> {
         "UPDATE Course SET title = ?1, description = ?2, level = ?3, total_seats = ?4, seats = ?5, price = ?6 WHERE ID = ?7",
         params![
             course.title,
-            course.description, // Если description: Option<String>
-            course.level,       // Если level: Option<String> ИЛИ Level enum с ToSql
-            course.total_seats, // Если total_seats: Option<i32>
-            course.seats,       // Если seats: Option<i32>
-            course.price,       // Если price: Option<f64>
+            course.description, 
+            course.level,       
+            course.total_seats, 
+            course.seats,      
+            course.price,      
             course.id
         ],
     )?;
@@ -1418,4 +1418,50 @@ pub fn get_certificates_for_student(conn: &Connection, student_id: i32) -> Resul
     })?;
 
     certificates_iter.collect()
+}
+pub fn get_payments_between(
+    conn: &Connection,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> Result<Vec<Payment>> {
+    let query = r#"
+        SELECT
+            p.date,
+            u.name AS student_name,
+            c.title AS course_title,
+            p.type AS payment_type,
+            p.amount
+        FROM Payment p
+        JOIN Users u ON p.student_id = u.ID
+        JOIN Course c ON p.course_id = c.ID
+        WHERE p.date BETWEEN ?1 AND ?2
+        ORDER BY p.date ASC
+    "#;
+
+    let start_str = start.format("%Y-%m-%d").to_string();
+    let end_str = end.format("%Y-%m-%d").to_string();
+
+    let mut stmt = conn.prepare(query)?;
+
+    let payments_iter = stmt.query_map(params![start_str, end_str], |row| {
+        Ok(Payment {
+            id: 0,
+            student_id: 0,
+            date: row.get(0)?,
+            student_name: row.get(1)?,
+            course_title: row.get(2)?,
+            payment_type: row.get(3)?,
+            course_id: 0,
+            amount: row.get(4)?,
+            group_id: 0,
+            group_name: "".to_string(),
+        })
+    })?;
+
+    let mut payments = Vec::new();
+    for payment in payments_iter {
+        payments.push(payment?);
+    }
+
+    Ok(payments)
 }

@@ -1,15 +1,16 @@
+use chrono::NaiveDate;
 use std::fs;
 use std::path::{Path};
 use std::str::FromStr;
-use headless_chrome::{Browser, LaunchOptionsBuilder};
 use iced::{Task, Theme};
 use iced::widget::{text_editor};
 use regex::Regex;
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use tokio::task::spawn_blocking;
-use crate::app::state::{Assignment, AssignmentType, Certificate, Config, Course, Group, LessonWithAssignments, Level, Screen, StudentAttendance, TextInputOrEditorInput, UserInfo, CONFIG_FILE, DEFAULT_AVATAR, PATH_TO_DB};
+use crate::app::state::{Assignment, AssignmentType, Config, Course, DatePickerOpen, Group, LessonWithAssignments, Level, ReportType, Screen, StudentAttendance, TextInputOrEditorInput, UserInfo, CONFIG_FILE, DEFAULT_AVATAR, PATH_TO_DB};
 use crate::db;
+use crate::doc_gen::{generate_certificate_html, generate_payment_excel_report, generate_payment_report, generate_pdf_from_html};
 use crate::screens::settings::theme_to_str;
 use super::{App, Message};
 
@@ -2677,8 +2678,147 @@ impl App {
                 }
                 Task::none()
             }
+            Message::ToggleReportModal => {
+                self.show_report_modal = !self.show_report_modal;
+                Task::none()
+            }
+            Message::ChooseStartDate => {
+                self.date_picker_open = DatePickerOpen::Start;
+                Task::none()
+            }
+            Message::ChooseEndDate => {
+                self.date_picker_open = DatePickerOpen::End;
+                Task::none()
+            }
+            Message::SubmitStartDate(date) => {
+                self.report_period_start = date;
+                self.date_picker_open = DatePickerOpen::None;
+                Task::none()
+            }
+            Message::SubmitEndDate(date) => {
+                self.report_period_end = date;
+                self.date_picker_open = DatePickerOpen::None;
+                Task::none()
+            }
+            Message::CancelDatePicker => {
+                self.date_picker_open = DatePickerOpen::None;
+                Task::none()
+            }
+
+            Message::GeneratePaymentReport => {
+                let output_dir = Path::new("reports");
+                fs::create_dir_all(output_dir).ok();
+
+                if let (Some(from), Some(to)) = (
+                    NaiveDate::from_ymd_opt(self.report_period_start.year, self.report_period_start.month, self.report_period_start.day),
+                    NaiveDate::from_ymd_opt(self.report_period_end.year, self.report_period_end.month, self.report_period_end.day),
+                ) {
+                    match self.selected_report_type {
+                        Some(ReportType::PDF) => {
+                            let filtered_payments: Vec<_> = self.payments.iter()
+                                .filter(|payment| {
+                                    if let Ok(payment_date) = NaiveDate::parse_from_str(&payment.date, "%Y-%m-%d") {
+                                        payment_date >= from && payment_date <= to
+                                    } else {
+                                        false
+                                    }
+                                })
+                                .cloned()
+                                .collect();
+
+                            if filtered_payments.is_empty() {
+                                println!("Нет платежей за указанный период");
+                                return Task::none();
+                            }
+
+                            let from_str = from.format("%Y-%m-%d").to_string();
+                            let to_str = to.format("%Y-%m-%d").to_string();
+                            let output_dir = output_dir.to_path_buf();
+
+                            return Task::perform(
+                                async move {
+                                    spawn_blocking(move || {
+                                        let path = output_dir.join("payment_report.pdf");
+                                        generate_payment_report(&filtered_payments, &from_str, &to_str, &output_dir).unwrap();
+                                        Ok(path)
+                                    })
+                                        .await
+                                        .unwrap_or_else(|e| Err(format!("Ошибка блокирующей задачи: {e:?}")))
+                                },
+                                Message::ReportGenerated,
+                            );
+                        }
+
+                        Some(ReportType::Excel) => {
+                            let from_copy = from.clone();
+                            let to_copy = to.clone();
+                            let output_dir = output_dir.to_path_buf();
+
+                            Task::perform(
+                                async move {
+                                    spawn_blocking(move || {
+                                        let conn = Connection::open(PATH_TO_DB)
+                                            .map_err(|e| format!("Ошибка подключения к БД: {}", e))?;
+                                        let payments = db::get_payments_between(&conn, from_copy, to_copy)
+                                            .map_err(|e| e.to_string())?;
+
+                                        let file_name = format!("payment_report_{}_{}.xlsx",
+                                                                from_copy.format("%Y-%m-%d"),
+                                                                to_copy.format("%Y-%m-%d")
+                                        );
+                                        let path = output_dir.join(file_name);
+
+                                        generate_payment_excel_report(&payments, &from_copy, &to_copy, &path).unwrap();
+
+                                        Ok(path)
+                                    })
+                                        .await
+                                        .unwrap_or_else(|e| Err(format!("Ошибка блокирующей задачи: {e:?}")))
+                                },
+                                Message::ReportGenerated,
+                            )
+                        }
+
+                        None => {
+                            println!("Тип отчёта не выбран");
+                            Task::none()
+                        }
+                    }
+                } else {
+                    println!("Неверный период даты");
+                    Task::none()
+                }
+            }
+            Message::ReportGenerated(result) => {
+                match result {
+                    Ok(path) => {
+                        println!("Отчёт успешно сгенерирован: {}", path.display());
+                        self.error_message = format!("Отчёт успешно сгенерирован: {}", path.display());
+
+                        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+                        {
+                            if let Err(e) = open::that(&path) {
+                                let msg = format!("Ошибка при открытии отчёта: {}", e);
+                                self.error_message = msg.clone();
+                                eprintln!("{msg}");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.error_message = format!("Ошибка генерации отчёта: {}", e);
+                        eprintln!("{}", self.error_message);
+                    }
+                }
+
+                self.show_report_modal = false;
+                Task::none()
+            }
+            Message::ReportTypeSelected(selected) => {
+                self.selected_report_type = selected;
+                Task::none()
+            }
         }
-        
+
     }
     fn reset_new_payment_form(&mut self) {
         self.new_payment_student = None;
@@ -2743,221 +2883,4 @@ async fn load_teacher_groups(teacher_email: String) -> Result<Vec<Group>, String
     db::get_groups_for_teacher(&conn, teacher_id)
         .map_err(|e| format!("Failed to load groups for teacher {}: {}", teacher_id, e))
 }
-pub fn generate_certificate_html(
-    cert: &Certificate,
-    student: &UserInfo,
-    output_path: &Path,
-    assets_dir: &Path,
-) -> std::io::Result<()> {
-    fn to_file_uri(path: &Path) -> std::io::Result<String> {
-        let p = path.canonicalize()?;
-        let mut s = p.to_str().unwrap().to_string();
 
-        #[cfg(target_os = "windows")]
-        {
-            if let Some(stripped) = s.strip_prefix(r"\\?\") {
-                s = stripped.to_string();
-            }
-        }
-
-        let s = s.replace("\\", "/");
-
-        #[cfg(target_os = "windows")]
-        {
-            Ok(format!("file:///{}", s))
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            Ok(format!("file://{}", s))
-        }
-    }
-
-    let signature_uri = to_file_uri(&assets_dir.join("images/signature.png"))?;
-    let seal_uri = to_file_uri(&assets_dir.join("images/seal.png"))?;
-
-    let html_content = format!(
-        r#"<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="UTF-8" />
-<title>Сертификат</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Fira+Sans&display=swap');
-  @page {{
-    size: A4;
-    margin: 0;
-  }}
-  body {{
-    font-family: 'Fira Sans', sans-serif;
-    background: #282828;
-    margin: 0;
-    padding: 0;
-    color: #ebdbb2;
-    width: 794px;
-    height: 1123px;
-  }}
-  .certificate {{
-    border: 8px solid #458588;
-    padding: 40px;
-    width: 718px;
-    height: 1043px;
-    margin: 0 auto;
-    background: #3c3836;
-    box-shadow: 0 0 15px rgba(0,0,0,0.5);
-    text-align: center;
-    border-radius: 12px;
-    position: relative;
-    box-sizing: border-box;
-  }}
-  h1 {{
-    font-size: 56px;
-    color: #fabd2f;
-    margin-bottom: 20px;
-  }}
-  p {{
-    font-size: 20px;
-    margin: 15px 0;
-  }}
-  .student-name {{
-    font-weight: bold;
-    font-size: 40px;
-    color: #83a598;
-    margin: 30px 0;
-  }}
-  .course-title {{
-    font-weight: bold;
-    font-size: 34px;
-    margin: 20px 0;
-    color: #b8bb26;
-  }}
-  .grade {{
-    font-size: 22px;
-    margin: 15px 0;
-    font-weight: 600;
-    color: #fb4934;
-  }}
-  .footer {{
-    margin-top: 60px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0 30px;
-  }}
-  .signature-box {{
-    width: 40%;
-    border-top: 1px solid #928374;
-    padding-top: 10px;
-    font-size: 18px;
-    font-weight: 600;
-    color: #ebdbb2;
-    position: relative;
-  }}
-  .signature-img {{
-    position: absolute;
-    top: -70px;
-    left: 0;
-    width: 150px;
-    height: auto;
-  }}
-  .stamp-img {{
-    width: 120px;
-    height: auto;
-    opacity: 0.5;
-    filter: drop-shadow(0 0 2px rgba(0,0,0,0.3));
-    margin-right: 10px;
-  }}
-  .date {{
-    font-size: 16px;
-    color: #a89984;
-    margin-top: 40px;
-  }}
-  .decorative-line {{
-    width: 60px;
-    height: 4px;
-    background: #d79921;
-    margin: 20px auto;
-    border-radius: 2px;
-  }}
-</style>
-</head>
-<body>
-  <div class="certificate">
-    <h1>СЕРТИФИКАТ</h1>
-    <div class="decorative-line"></div>
-    <p>Настоящим подтверждается, что</p>
-    <p class="student-name">{student_name}</p>
-    <p>успешно завершил(а) курс</p>
-    <p class="course-title">{course_title}</p>
-    <p class="grade">С оценкой: {grade}</p>
-    <div class="decorative-line"></div>
-
-    <div class="footer">
-      <div class="signature-box">
-        <img src="{signature_uri}" alt="Подпись директора" class="signature-img" />
-        Подпись директора
-      </div>
-      <img src="{seal_uri}" alt="Печать" class="stamp-img" />
-    </div>
-
-    <p class="date">Дата выдачи: {issue_date}</p>
-  </div>
-</body>
-</html>"#,
-        student_name = student.name,
-        course_title = cert.course_title,
-        grade = cert.grade,
-        issue_date = cert.issue_date,
-        signature_uri = signature_uri,
-        seal_uri = seal_uri,
-    );
-
-    fs::write(output_path, html_content)
-}
-
-pub fn generate_pdf_from_html(
-    html_path: &Path,
-    output_pdf: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let browser = Browser::new(
-        LaunchOptionsBuilder::default()
-            .headless(true)
-            .build()
-            .unwrap(),
-    )?;
-
-    let tab = browser.new_tab()?;
-
-    // Получаем абсолютный путь
-    let abs_path = fs::canonicalize(html_path)?;
-    let mut abs_str = abs_path
-        .to_str()
-        .ok_or("Путь содержит недопустимые символы (не UTF-8)")?
-        .to_string();
-
-    #[cfg(target_os = "windows")]
-    {
-        // Убираем префикс \\?\ если он есть
-        if let Some(stripped) = abs_str.strip_prefix(r"\\?\") {
-            abs_str = stripped.to_string();
-        }
-        // Заменяем \ на /
-        abs_str = abs_str.replace("\\", "/");
-    }
-
-    // Формируем корректный file:// URL
-    #[cfg(target_os = "windows")]
-    let url = format!("file:///{}", abs_str);
-
-    #[cfg(not(target_os = "windows"))]
-    let url = format!("file://{}", abs_str);
-
-    println!("DEBUG: Навигация headless_chrome к URL: {}", url);
-
-    tab.navigate_to(&url)?;
-    tab.wait_until_navigated()?;
-
-    let pdf_data = tab.print_to_pdf(Default::default())?;
-    fs::write(output_pdf, &pdf_data)?;
-
-    Ok(())
-}

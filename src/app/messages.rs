@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use iced_aw::date_picker::Date;
-use crate::app::state::{Assignment, AssignmentType, Certificate, Course, CoursePickListItem, Group, GroupPickListItem, GroupStatus, LessonWithAssignments, Level, PastSession, Payment, StudentAttendance, StudentPickListItem, TextInputOrEditorInput, UserInfo};
+use crate::app::state::{Assignment, AssignmentType, Certificate, Course, CoursePickListItem, Group, GroupPickListItem, GroupStatus, LessonWithAssignments, Level, PastSession, Payment, ReportType, StudentAttendance, StudentPickListItem, TextInputOrEditorInput, UserInfo};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -198,4 +198,14 @@ pub enum Message {
     // Сообщение для генерации сертификата
     GenerateCertificatePdf(Certificate, UserInfo),
     CertificatePdfGenerated(Result<PathBuf, String>), // Результат генерации PDF: путь к файлу или ошибка
+    //
+    ToggleReportModal,
+    GeneratePaymentReport,
+    ChooseStartDate,
+    ChooseEndDate,
+    SubmitStartDate(Date),
+    SubmitEndDate(Date),
+    CancelDatePicker,
+    ReportTypeSelected(Option<ReportType>),
+    ReportGenerated(Result<PathBuf, String>),
 }

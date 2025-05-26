@@ -140,7 +140,6 @@ pub struct App {
     pub selected_group_lessons_with_assignments: Vec<LessonWithAssignments>,
     pub course_id_to_title: std::collections::HashMap<i32, String>,
     
-    pub edit_course_teacher_id: Option<i32>,
     pub all_courses: Vec<Course>,
     pub past_sessions_for_group: Vec<PastSession>, // Для отображения списка прошедших занятий
 
@@ -187,6 +186,12 @@ pub struct App {
     pub selected_student_for_certificates: Option<UserInfo>,
     pub selected_student_certs: Vec<Certificate>, // Сертификаты выбранного студента
     pub is_loading_student_certs: bool, // Флаг загрузки сертификатов студента
+    //
+    pub date_picker_open: DatePickerOpen,
+    pub show_report_modal: bool,
+    pub report_period_start: Date,
+    pub report_period_end: Date,
+    pub selected_report_type: Option<ReportType>,
 }
 impl Default for App {
     fn default() -> Self {
@@ -284,7 +289,6 @@ impl Default for App {
             editing_assignment_description_text_input: "".to_string(),
             selected_group_lessons_with_assignments: vec![],
             course_id_to_title: Default::default(),
-            edit_course_teacher_id: None,
             all_courses: vec![],
             past_sessions_for_group: vec![],
             show_group_lessons_modal: false,
@@ -321,11 +325,36 @@ impl Default for App {
             selected_student_for_certificates: None,
             selected_student_certs: vec![],
             is_loading_student_certs: false,
+            date_picker_open: DatePickerOpen::None,
+            show_report_modal: false,
+            report_period_start: Default::default(),
+            report_period_end: Default::default(),
+            selected_report_type: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportType {
+    PDF,
+    Excel,
+}
+
+impl std::fmt::Display for ReportType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReportType::PDF => write!(f, "PDF"),
+            ReportType::Excel => write!(f, "Excel"),
         }
     }
 }
 
 
+pub enum DatePickerOpen {
+    None,
+    Start,
+    End,
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)] // Copy позволит избежать лишних клонирований
 pub enum GroupStatus {
     Active,
@@ -333,10 +362,8 @@ pub enum GroupStatus {
 }
 
 // Реализация Display для GroupStatus, чтобы PickList мог его отображать
-impl std::fmt::Display for GroupStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Мы используем `match` для преобразования варианта enum в строку,
-        // так как Rust по умолчанию не знает, как отображать enum как строку.
+impl fmt::Display for GroupStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             GroupStatus::Active => write!(f, "Активна"),
             GroupStatus::Inactive => write!(f, "Неактивна"),
@@ -499,7 +526,6 @@ pub enum TextInputOrEditorInput {
 pub enum AssignmentType {
     #[default] // Задаем значение по умолчанию, если потребуется
     Lecture,
-    Test,
     Practice,
     // Добавьте другие типы по необходимости
 }
@@ -507,7 +533,6 @@ pub enum AssignmentType {
 impl AssignmentType {
     pub const ALL: &'static [AssignmentType] = &[
         AssignmentType::Lecture,
-        AssignmentType::Test,
         AssignmentType::Practice,
     ];
 }
@@ -520,7 +545,6 @@ impl fmt::Display for AssignmentType {
             "{}",
             match self {
                 AssignmentType::Lecture => "Лекция",
-                AssignmentType::Test => "Тест",
                 AssignmentType::Practice => "Практика",
             }
         )
