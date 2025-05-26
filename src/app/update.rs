@@ -2603,16 +2603,27 @@ impl App {
                 Task::perform(
                     async move {
                         spawn_blocking(move || {
-                            // Путь для временного HTML и итогового PDF
-                            let html_path = std::path::PathBuf::from("certificates/temp_certificate.html");
-                            let pdf_path = std::path::PathBuf::from("certificates/certificate_output.pdf");
+                            // 1. Получаем путь к директории с исполняемым файлом
+                            let exe_dir = std::env::current_exe()
+                                .map_err(|e| format!("Не удалось получить путь к исполняемому файлу: {}", e))?
+                                .parent()
+                                .ok_or("Не удалось получить директорию исполняемого файла")?
+                                .to_path_buf();
 
-                            // 1. Генерируем HTML
-                            if let Err(e) = generate_certificate_html(&cert, &student, &html_path) {
+                            // 2. Формируем абсолютные пути к HTML и PDF
+                            let assets_path = exe_dir.join("assets");
+                            let html_path = exe_dir.join("certificates").join("temp_certificate.html");
+                            let pdf_path = exe_dir.join("certificates").join("certificate_output.pdf");
+
+                            println!("DEBUG: HTML путь: {:?}", html_path);
+                            println!("DEBUG: PDF путь: {:?}", pdf_path);
+
+                            // 3. Генерируем HTML
+                            if let Err(e) = generate_certificate_html(&cert, &student, &html_path, &assets_path) {
                                 return Err(format!("Ошибка генерации HTML: {}", e));
                             }
 
-                            // 2. Конвертируем HTML в PDF
+                            // 4. Генерируем PDF из HTML
                             if let Err(e) = generate_pdf_from_html(&html_path, &pdf_path) {
                                 return Err(format!("Ошибка конвертации в PDF: {}", e));
                             }
@@ -2621,7 +2632,7 @@ impl App {
                         })
                             .await
                             .unwrap_or_else(|join_err| {
-                                Err(format!("Блокирующая задача (генерация PDF) завершилась ошибкой: {:?}", join_err))
+                                Err(format!("Блокирующая задача завершилась ошибкой: {:?}", join_err))
                             })
                     },
                     Message::CertificatePdfGenerated,
@@ -2736,7 +2747,34 @@ pub fn generate_certificate_html(
     cert: &Certificate,
     student: &UserInfo,
     output_path: &Path,
+    assets_dir: &Path,
 ) -> std::io::Result<()> {
+    fn to_file_uri(path: &Path) -> std::io::Result<String> {
+        let p = path.canonicalize()?;
+        let mut s = p.to_str().unwrap().to_string();
+
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(stripped) = s.strip_prefix(r"\\?\") {
+                s = stripped.to_string();
+            }
+        }
+
+        let s = s.replace("\\", "/");
+
+        #[cfg(target_os = "windows")]
+        {
+            Ok(format!("file:///{}", s))
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            Ok(format!("file://{}", s))
+        }
+    }
+
+    let signature_uri = to_file_uri(&assets_dir.join("images/signature.png"))?;
+    let seal_uri = to_file_uri(&assets_dir.join("images/seal.png"))?;
+
     let html_content = format!(
         r#"<!DOCTYPE html>
 <html lang="ru">
@@ -2745,12 +2783,10 @@ pub fn generate_certificate_html(
 <title>Сертификат</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Fira+Sans&display=swap');
-
   @page {{
     size: A4;
     margin: 0;
   }}
-
   body {{
     font-family: 'Fira Sans', sans-serif;
     background: #282828;
@@ -2760,12 +2796,11 @@ pub fn generate_certificate_html(
     width: 794px;
     height: 1123px;
   }}
-
   .certificate {{
     border: 8px solid #458588;
     padding: 40px;
-    width: 718px; /* 794 - 2*8(border) - 2*30(margin) */
-    height: 1043px; /* 1123 - 2*40(padding top/bottom) */
+    width: 718px;
+    height: 1043px;
     margin: 0 auto;
     background: #3c3836;
     box-shadow: 0 0 15px rgba(0,0,0,0.5);
@@ -2781,7 +2816,6 @@ pub fn generate_certificate_html(
   }}
   p {{
     font-size: 20px;
-    color: #ebdbb2;
     margin: 15px 0;
   }}
   .student-name {{
@@ -2859,10 +2893,10 @@ pub fn generate_certificate_html(
 
     <div class="footer">
       <div class="signature-box">
-        <img src="../assets/images/signature.png" alt="Подпись директора" class="signature-img" />
+        <img src="{signature_uri}" alt="Подпись директора" class="signature-img" />
         Подпись директора
       </div>
-      <img src="../assets/images/seal.png" alt="Печать" class="stamp-img" />
+      <img src="{seal_uri}" alt="Печать" class="stamp-img" />
     </div>
 
     <p class="date">Дата выдачи: {issue_date}</p>
@@ -2872,13 +2906,18 @@ pub fn generate_certificate_html(
         student_name = student.name,
         course_title = cert.course_title,
         grade = cert.grade,
-        issue_date = cert.issue_date
+        issue_date = cert.issue_date,
+        signature_uri = signature_uri,
+        seal_uri = seal_uri,
     );
 
     fs::write(output_path, html_content)
 }
 
-pub fn generate_pdf_from_html(html_path: &Path, output_pdf: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn generate_pdf_from_html(
+    html_path: &Path,
+    output_pdf: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let browser = Browser::new(
         LaunchOptionsBuilder::default()
             .headless(true)
@@ -2888,14 +2927,36 @@ pub fn generate_pdf_from_html(html_path: &Path, output_pdf: &Path) -> Result<(),
 
     let tab = browser.new_tab()?;
 
+    // Получаем абсолютный путь
     let abs_path = fs::canonicalize(html_path)?;
-    let url = format!("file://{}", abs_path.to_str().unwrap());
+    let mut abs_str = abs_path
+        .to_str()
+        .ok_or("Путь содержит недопустимые символы (не UTF-8)")?
+        .to_string();
+
+    #[cfg(target_os = "windows")]
+    {
+        // Убираем префикс \\?\ если он есть
+        if let Some(stripped) = abs_str.strip_prefix(r"\\?\") {
+            abs_str = stripped.to_string();
+        }
+        // Заменяем \ на /
+        abs_str = abs_str.replace("\\", "/");
+    }
+
+    // Формируем корректный file:// URL
+    #[cfg(target_os = "windows")]
+    let url = format!("file:///{}", abs_str);
+
+    #[cfg(not(target_os = "windows"))]
+    let url = format!("file://{}", abs_str);
+
+    println!("DEBUG: Навигация headless_chrome к URL: {}", url);
 
     tab.navigate_to(&url)?;
     tab.wait_until_navigated()?;
 
     let pdf_data = tab.print_to_pdf(Default::default())?;
-
     fs::write(output_pdf, &pdf_data)?;
 
     Ok(())
