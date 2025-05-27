@@ -1,6 +1,7 @@
 mod app;
 mod db;
 mod doc_gen;
+pub mod config;
 mod screens;
 
 use iced::{window, Size};

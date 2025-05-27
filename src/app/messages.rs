@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use iced_aw::date_picker::Date;
-use crate::app::state::{Assignment, AssignmentType, Certificate, Course, CoursePickListItem, Group, GroupPickListItem, GroupStatus, LessonWithAssignments, Level, PastSession, Payment, ReportType, StudentAttendance, StudentPickListItem, TextInputOrEditorInput, UserInfo};
+use crate::app::state::{Assignment, AssignmentType, BackupInterval, Certificate, Course, CoursePickListItem, Group, GroupPickListItem, GroupStatus, LessonWithAssignments, Level, PastSession, Payment, ReportType, StudentAttendance, StudentPickListItem, TextInputOrEditorInput, UserInfo};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -220,4 +220,9 @@ pub enum Message {
     ToggleGroupReportModal,
     GroupReportGenerated(Result<PathBuf, String>),
     GenerateGroupReport,
+    BackupIntervalSelected(Option<BackupInterval>),
+    BackupNowPressed,
+    SelectBackupFolder,
+    BackupFolderSelected(Option<String>),
+    MaxBackupCountSelected(Option<usize>),
 }

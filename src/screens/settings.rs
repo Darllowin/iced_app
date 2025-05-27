@@ -1,48 +1,49 @@
 use crate::app::{App, Message};
-use iced::widget::pick_list;
-use iced::{widget::{column, text, vertical_space, Container}, Center, Length, Theme};
+use iced::widget::{button, pick_list, row};
+use iced::{widget::{column, text, Container}, Length, Theme};
+use crate::app::state::{BackupInterval, BACKUP_INTERVALS};
+use crate::config::theme_to_str;
 
-pub fn settings_screen(_app: &App) -> Container<Message> {
-    let current_name = theme_to_str(&_app.theme);
+pub fn settings_screen(app: &App) -> Container<Message> {
+    let current_theme_name = theme_to_str(&app.theme);
     let theme_names: Vec<&'static str> = Theme::ALL.iter().map(theme_to_str).collect();
+    
+    let max_backup_options = vec![3, 5, 10, 20];
+
     let content = column![
-        text("Настройки").size(30),
-        vertical_space(),
-        pick_list(theme_names, Some(current_name), Message::ThemeSelected)
-        .placeholder("Выберите тему"),
-    ]
-        .spacing(15)
-        .align_x(Center);
+        row![
+            text("Настройки").size(30),
+        ].padding(10),
+        row![
+            column![
+                text("Тема приложения").size(26),
+                pick_list(theme_names, Some(current_theme_name), Message::ThemeSelected)
+                    .placeholder("Выберите тему"),
+                text("Период резервного копирования").size(26),
+                pick_list(
+                    BACKUP_INTERVALS.to_vec(),
+                    app.backup_interval.clone(),
+                    |value: BackupInterval| Message::BackupIntervalSelected(Some(value)),
+                ).placeholder("Период резервного копирования"),
+                row![
+                    text("Папка для бэкапов: "),
+                    button("Выбрать").on_press(Message::SelectBackupFolder),
+                    text(app.backup_folder.clone().unwrap_or("Не выбрана".to_string())),
+                ]
+                 .spacing(10),
+                  pick_list(
+                     max_backup_options,
+                     app.max_backup_count,
+                     |value| Message::MaxBackupCountSelected(Some(value)),
+                  ).placeholder("Максимум резервных копий"),
+                button("Сделать резервную копию сейчас").on_press(Message::BackupNowPressed),
+            ].spacing(10).padding(10),
+        ],
+    ].spacing(15);
 
     Container::new(content)
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(40)
 }
-pub fn theme_to_str(theme: &Theme) -> &'static str {
-    match theme {
-        Theme::Light => "Light",
-        Theme::Dark => "Dark",
-        Theme::Dracula => "Dracula",
-        Theme::Nord => "Nord",
-        Theme::SolarizedLight => "SolarizedLight",
-        Theme::SolarizedDark => "SolarizedDark",
-        Theme::GruvboxLight => "GruvboxLight",
-        Theme::GruvboxDark => "GruvboxDark",
-        Theme::CatppuccinLatte => "CatppuccinLatte",
-        Theme::CatppuccinFrappe => "CatppuccinFrappe",
-        Theme::CatppuccinMacchiato => "CatppuccinMacchiato",
-        Theme::CatppuccinMocha => "CatppuccinMocha",
-        Theme::TokyoNight => "TokyoNight",
-        Theme::TokyoNightStorm => "TokyoNightStorm",
-        Theme::TokyoNightLight => "TokyoNightLight",
-        Theme::KanagawaWave => "KanagawaWave",
-        Theme::KanagawaDragon => "KanagawaDragon",
-        Theme::KanagawaLotus => "KanagawaLotus",
-        Theme::Moonfly => "Moonfly",
-        Theme::Nightfly => "Nightfly",
-        Theme::Oxocarbon => "Oxocarbon",
-        Theme::Ferra => "Ferra",
-        _ => "Unknown",
-    }
-}
+

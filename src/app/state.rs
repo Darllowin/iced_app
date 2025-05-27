@@ -6,11 +6,29 @@ use iced_aw::date_picker::Date;
 use rusqlite::ToSql;
 use rusqlite::types::{FromSql, FromSqlError, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
-use crate::app::update::load_theme;
+use crate::config::{load_config, theme_from_str};
 
 pub const PATH_TO_DB: &str = "db_platform";
 pub const CONFIG_FILE: &str = "config.json";
 pub const DEFAULT_AVATAR: &str = "assets/images/default_avatar.jpg";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupInterval {
+    pub display: &'static str,
+    pub value: &'static str,
+}
+impl fmt::Display for BackupInterval {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.display)
+    }
+}
+// Возможные интервалы (отображение → значение)
+pub const BACKUP_INTERVALS: [BackupInterval; 4] = [
+    BackupInterval { display: "Никогда", value: "never" },
+    BackupInterval { display: "Каждый день", value: "daily" },
+    BackupInterval { display: "Каждую неделю", value: "weekly" },
+    BackupInterval { display: "Каждый месяц", value: "monthly" },
+];
 
 pub struct App {
     pub date: Date,
@@ -193,11 +211,34 @@ pub struct App {
     //
     pub show_certificate_report_modal: bool,
     pub show_group_report_modal: bool,
+    //
+    pub backup_interval: Option<BackupInterval>,
+    pub backup_folder: Option<String>,
+    pub max_backup_count: Option<usize>,
 
 }
 impl Default for App {
     fn default() -> Self {
-        let selected_theme = load_theme().unwrap_or(Theme::Light);
+        let config = load_config();
+
+        let selected_theme = config
+            .as_ref()
+            .and_then(|c| theme_from_str(&c.theme_name))
+            .unwrap_or(Theme::GruvboxDark);
+
+        let backup_interval = config
+            .as_ref()
+            .and_then(|c| {
+                let val = c.backup_interval.as_deref().unwrap_or("");
+                BACKUP_INTERVALS
+                    .iter()
+                    .find(|interval| interval.value.eq_ignore_ascii_case(val))
+                    .cloned()
+            });
+
+        let backup_folder = config.as_ref().and_then(|c| c.backup_folder.clone());
+
+        let max_backup_count = config.as_ref().and_then(|c| c.max_backup_count);
         Self {
             error_message: "".to_string(),
             date: Date::today(),
@@ -211,6 +252,9 @@ impl Default for App {
             user_password: "".to_string(),
             user_password_repeat: "".to_string(),
             theme: selected_theme,
+            backup_interval,
+            backup_folder,
+            max_backup_count,
             register_error: None,
             registration_success: false,
             logged_in_user: "".to_string(),
@@ -736,6 +780,9 @@ impl fmt::Display for GroupPickListItem {
 #[derive(Serialize, Deserialize)]
 pub struct Config {
     pub theme_name: String,
+    pub backup_interval: Option<String>,
+    pub backup_folder: Option<String>,
+    pub max_backup_count: Option<usize>,
 }
 #[derive(PartialEq, Default)]
 pub enum Screen {

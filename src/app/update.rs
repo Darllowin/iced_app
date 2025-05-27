@@ -1,17 +1,23 @@
-use chrono::NaiveDate;
+use chrono::{Local, NaiveDate};
 use std::fs;
 use std::path::{Path};
 use std::str::FromStr;
-use iced::{Task, Theme};
+use iced::{Task};
 use iced::widget::{text_editor};
 use regex::Regex;
+use rfd::FileDialog;
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use tokio::task::spawn_blocking;
-use crate::app::state::{Assignment, AssignmentType, Config, Course, DatePickerOpen, Group, LessonWithAssignments, Level, ReportType, Screen, StudentAttendance, TextInputOrEditorInput, UserInfo, CONFIG_FILE, DEFAULT_AVATAR, PATH_TO_DB};
+use crate::app::state::{Assignment, AssignmentType, Course, DatePickerOpen, Group,
+                        LessonWithAssignments, Level, ReportType, Screen, StudentAttendance,
+                        TextInputOrEditorInput, UserInfo, DEFAULT_AVATAR, PATH_TO_DB};
+use crate::config::{backup_database_now, save_config, theme_from_str};
 use crate::db;
-use crate::doc_gen::{generate_certificate_excel_report, generate_certificate_html, generate_certificate_report, generate_group_excel_report, generate_group_report, generate_payment_excel_report, generate_payment_report, generate_pdf_from_html};
-use crate::screens::settings::theme_to_str;
+use crate::doc_gen::{generate_certificate_excel_report, generate_certificate_html,
+                     generate_certificate_report, generate_group_excel_report,
+                     generate_group_report, generate_payment_excel_report, generate_payment_report,
+                     generate_pdf_from_html};
 use super::{App, Message};
 
 impl App {
@@ -251,9 +257,14 @@ impl App {
                 Task::none()
             }
             Message::ThemeSelected(name) => {
-                if let Some(theme) = theme_from_str(name) {
-                    let _ = save_theme(&theme);
-                    self.theme= theme;
+                if let Some(new_theme) = theme_from_str(name) {
+                    self.theme = new_theme;
+                    save_config(
+                        &self.theme,
+                        self.backup_interval.as_ref().map(|interval| interval.value),
+                        self.backup_folder.clone(),
+                        self.max_backup_count,
+                    ).ok();
                 }
                 Task::none()
             }
@@ -2281,7 +2292,7 @@ impl App {
                     let course_id = course.id;
                     let group_id = group.id;
                     let payment_type = self.new_payment_type.clone();
-                    let current_date = chrono::Local::now().format("%Y-%m-%d").to_string();
+                    let current_date = Local::now().format("%Y-%m-%d").to_string();
 
                     Task::perform(
                         async move {
@@ -3050,7 +3061,59 @@ impl App {
 
                 Task::none()
             }
-
+            Message::BackupIntervalSelected(interval) => {
+                self.backup_interval = interval; 
+                save_config(
+                    &self.theme,
+                    self.backup_interval.as_ref().map(|i| i.value),
+                    self.backup_folder.clone(),
+                    self.max_backup_count,
+                ).ok();
+                Task::none()
+            }
+            Message::BackupNowPressed => {
+                if let Err(e) = backup_database_now() {
+                    println!("Ошибка резервного копирования: {}", e);
+                }
+                Task::none()
+            }
+            Message::SelectBackupFolder => {
+                if let Some(folder) = FileDialog::new().pick_folder() {
+                    self.backup_folder = Some(folder.display().to_string());
+                    save_config(
+                        &self.theme,
+                        self.backup_interval.as_ref().map(|interval| interval.value),
+                        self.backup_folder.clone(),
+                        self.max_backup_count,
+                    )
+                        .ok();
+                }
+                Task::none()
+            }
+            Message::BackupFolderSelected(folder_opt) => {
+                if let Some(folder) = folder_opt {
+                    self.backup_folder = Some(folder.clone());
+                    save_config(
+                        &self.theme,
+                        self.backup_interval.as_ref().map(|interval| interval.value),
+                        self.backup_folder.clone(),
+                        self.max_backup_count,
+                    )
+                        .ok();
+                }
+                Task::none()
+            }
+            Message::MaxBackupCountSelected(count_opt) => {
+                self.max_backup_count = count_opt;
+                save_config(
+                    &self.theme,
+                    self.backup_interval.as_ref().map(|interval| interval.value),
+                    self.backup_folder.clone(),
+                    self.max_backup_count,
+                )
+                    .ok();
+                Task::none()
+            }
         }
     }
     fn reset_new_payment_form(&mut self) {
@@ -3077,28 +3140,7 @@ impl App {
     }
 }
 
-pub fn theme_from_str(name: &str) -> Option<Theme> {
-    Theme::ALL
-        .iter()
-        .find(|t| theme_to_str(t).eq_ignore_ascii_case(name))
-        .cloned()
-}
 
-pub fn save_theme(theme: &Theme) -> std::io::Result<()> {
-    let config = Config {
-        theme_name: theme_to_str(theme).to_string(),
-
-    };
-    let json = serde_json::to_string_pretty(&config)?;
-    fs::write(CONFIG_FILE, json)?;
-    Ok(())
-}
-
-pub fn load_theme() -> Option<Theme> {
-    let contents = fs::read_to_string(CONFIG_FILE).ok()?;
-    let config: Config = serde_json::from_str(&contents).ok()?;
-    theme_from_str(&config.theme_name)
-}
 fn hash_password(password: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(password);
