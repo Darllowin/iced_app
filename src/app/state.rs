@@ -177,12 +177,10 @@ pub struct App {
     pub students_for_attendance: Vec<StudentAttendance>, // Для хранения данных о студентах в модальном окне
     pub current_lesson_to_conduct: Option<LessonWithAssignments>, // Хранит урок, который проводится
     pub current_group_for_attendance: Option<Group>, // Хранит группу для отметки посещаемости
-
     //
     pub students_with_certificates: Vec<UserInfo>,
-
     pub show_student_certificates_modal: bool, // Флаг для показа модалки сертификатов студента
-    // НОВОЕ: Используем UserInfo для выбранного студента в модалке
+    //
     pub selected_student_for_certificates: Option<UserInfo>,
     pub selected_student_certs: Vec<Certificate>, // Сертификаты выбранного студента
     pub is_loading_student_certs: bool, // Флаг загрузки сертификатов студента
@@ -194,6 +192,7 @@ pub struct App {
     pub selected_report_type: Option<ReportType>,
     //
     pub show_certificate_report_modal: bool,
+    pub show_group_report_modal: bool,
 
 }
 impl Default for App {
@@ -334,6 +333,7 @@ impl Default for App {
             report_period_end: Default::default(),
             selected_report_type: None,
             show_certificate_report_modal: false,
+            show_group_report_modal: false,
         }
     }
 }
@@ -475,6 +475,46 @@ pub struct Group {
 }
 
 impl fmt::Display for Group {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Начинаем с имени группы
+        write!(f, "{}", self.name)?;
+
+        let mut parts = Vec::new();
+
+        // Добавляем название курса, если оно есть
+        if let Some(course_name) = &self.course_name {
+            parts.push(format!("Курс: {}", course_name));
+        }
+
+        // Добавляем название преподавателя, если оно есть
+        if let Some(teacher_name) = &self.teacher_name {
+            parts.push(format!("Преподаватель: {}", teacher_name));
+        }
+
+        // Если есть дополнительные части (курс или преподаватель), добавляем их в скобках
+        if !parts.is_empty() {
+            write!(f, " ({})", parts.join(", "))?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+#[derive(PartialEq)]
+pub struct GroupForReport {
+    pub id: i32,
+    pub name: String,
+    pub course_id: Option<i32>,       // Сохраняем ID курса
+    pub course_name: Option<String>,  // Новое поле для названия курса
+    pub teacher_id: Option<i32>,      // Сохраняем ID преподавателя
+    pub teacher_name: Option<String>, // Новое поле для имени преподавателя
+    pub student_count: u8,
+    pub status: GroupStatus,
+    pub students: Vec<String>,
+}
+
+impl fmt::Display for GroupForReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Начинаем с имени группы
         write!(f, "{}", self.name)?;

@@ -86,10 +86,10 @@ pub fn payment_screen(app: &App) -> Container<Message> {
     let mut ui_stack = Stack::new().push(base_ui);
 
     if app.show_report_modal {
-        let start_button = Button::new(Text::new("Выбрать дату начала"))
+        let start_button = Button::new(Text::new("Начало периода"))
             .on_press(Message::ChooseStartDate);
 
-        let end_button = Button::new(Text::new("Выбрать дату конца"))
+        let end_button = Button::new(Text::new("Конец периода"))
             .on_press(Message::ChooseEndDate);
 
         let start_date_picker = date_picker(
@@ -109,14 +109,14 @@ pub fn payment_screen(app: &App) -> Container<Message> {
         );
 
         let start_date_display = Text::new(format!(
-            "Начало: {:02}:{:02}:{:04}",
+            "{:02}:{:02}:{:04}",
             app.report_period_start.day,
             app.report_period_start.month,
             app.report_period_start.year
         ));
 
         let end_date_display = Text::new(format!(
-            "Конец: {:02}:{:02}:{:04}",
+            "{:02}:{:02}:{:04}",
             app.report_period_end.day,
             app.report_period_end.month,
             app.report_period_end.year

@@ -1,9 +1,9 @@
 use iced::{widget::{Button, Column, Container, Row, Stack, Text, TextInput, mouse_area, Scrollable}, Alignment, Color, ContentFit, Length, Theme};
-use iced::widget::{button, horizontal_space, image, row, text, PickList, Rule};
+use iced::widget::{button, horizontal_space, image, pick_list, row, text, PickList, Rule};
 use iced::widget::container::{background, bordered_box};
 use iced::widget::image::Handle;
 use crate::app::{App, Message};
-use crate::app::state::{Course, Group, GroupStatus, UserInfo, DEFAULT_AVATAR};
+use crate::app::state::{Course, Group, GroupStatus, ReportType, UserInfo, DEFAULT_AVATAR};
 
 fn headerbar(group: &Group) -> Row<'static, Message> {
     row![
@@ -69,6 +69,9 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                         .size(18)
                         .width(Length::Fixed(400.0))
                 ).spacing(10).align_y(Alignment::Center)
+                .push(
+                    Button::new(Text::new("Отчёт")).on_press(Message::ToggleGroupReportModal)
+                )
         );
 
     for group in filtered_groups {
@@ -214,6 +217,56 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                 .style(move |_| background(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.7 }));
             ui_stack = ui_stack.push(modal_overlay);
         }
+    }
+
+    if app.show_group_report_modal {
+        let report_formats = vec![ReportType::PDF, ReportType::Excel];
+        let selected_format = app.selected_report_type;
+
+        let format_picklist = pick_list(
+            report_formats.clone(),
+            selected_format,
+            |selected: ReportType| Message::ReportTypeSelected(Some(selected)),
+        );
+        
+        
+        let modal_content = Column::new()
+            .spacing(15)
+            .padding(20)
+            .push(Text::new("Генерация отчёта по группам").size(24))
+            .push(Text::new("Выберите период:"))
+            .push(
+                Row::new()
+                    .spacing(15)
+                    .align_y(Alignment::Center)
+                    .push(format_picklist)
+                    .push(
+                        Button::new(Text::new("Сгенерировать отчёт"))
+                            .on_press(Message::GenerateGroupReport),
+                    )
+                    .push(
+                        Button::new(Text::new("Отмена"))
+                            .on_press(Message::ToggleGroupReportModal),
+                    ),
+            )
+            .push(Text::new(&app.error_message).size(24));
+
+        let modal_container = Container::new(modal_content)
+            .style(move |_| bordered_box(&app.theme))
+            .padding(20)
+            .width(Length::Fixed(500.0))
+            .height(Length::Shrink);
+
+        let modal_overlay = Container::new(
+            mouse_area(Container::new(modal_container).center(Length::Fill))
+        )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_y(Length::Fill)
+            .center_x(Length::Fill)
+            .style(move |_| background(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.7 }));
+
+        ui_stack = ui_stack.push(modal_overlay);
     }
 
     // Модальное окно добавления/редактирования группы

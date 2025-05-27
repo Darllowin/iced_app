@@ -6,7 +6,7 @@ use image::ImageReader;
 use rusqlite::{params, Connection, OptionalExtension, Result, Error, ffi, Transaction, params_from_iter};
 use serde::de::StdError;
 use tokio::task;
-use crate::app::state::{Assignment, Certificate, Course, Group, GroupStatus, LessonWithAssignments, PastSession, Payment, StudentAttendanceStatus, UserInfo, PATH_TO_DB};
+use crate::app::state::{Assignment, Certificate, Course, Group, GroupForReport, GroupStatus, LessonWithAssignments, PastSession, Payment, StudentAttendanceStatus, UserInfo, PATH_TO_DB};
 
 
 pub async fn authenticate_and_get_user_data(
@@ -1467,13 +1467,13 @@ pub fn get_payments_between(
 }
 pub fn get_certificates_between(conn: &Connection, from: NaiveDate, to: NaiveDate) -> Result<Vec<Certificate>> {
     let mut stmt = conn.prepare(
-        "SELECT 
-            c.id, 
-            c.student_id, 
-            u.name as student_name, 
-            c.course_id, 
-            cr.title as course_title, 
-            c.issue_date, 
+        "SELECT
+            c.id,
+            c.student_id,
+            u.name as student_name,
+            c.course_id,
+            cr.title as course_title,
+            c.issue_date,
             c.grade
          FROM Certificates c
          JOIN Users u ON u.id = c.student_id
@@ -1504,3 +1504,44 @@ pub fn get_certificates_between(conn: &Connection, from: NaiveDate, to: NaiveDat
 
     Ok(certs)
 }
+pub fn get_all_groups_for_report(conn: &Connection) -> Result<Vec<GroupForReport>, Error> {
+    let mut stmt = conn.prepare(
+        "SELECT g.id, g.name, g.course_id, c.title, g.teacher_id, u.Name, g.student_count, g.status
+         FROM `Group` g
+         LEFT JOIN Course c ON g.course_id = c.ID
+         LEFT JOIN Users u ON g.teacher_id = u.ID"
+    )?;
+
+    let group_rows = stmt.query_map([], |row| {
+        Ok(GroupForReport {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            course_id: row.get(2)?,
+            course_name: row.get(3)?,
+            teacher_id: row.get(4)?,
+            teacher_name: row.get(5)?,
+            student_count: row.get(6)?,
+            status: row.get(7)?,
+            students: Vec::new(), // Заполним позже
+        })
+    })?;
+
+    let mut groups: Vec<GroupForReport> = Vec::new();
+    for mut group in group_rows {
+        let mut stmt = conn.prepare(
+            "SELECT u.Name FROM GroupStudent gs
+             JOIN Users u ON gs.student_id = u.ID
+             WHERE gs.group_id = ?1"
+        )?;
+
+        let student_names = stmt
+            .query_map([group.as_ref().unwrap().id], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+
+        group.as_mut().unwrap().students = student_names;
+        groups.push(group?);
+    }
+
+    Ok(groups)
+}
+

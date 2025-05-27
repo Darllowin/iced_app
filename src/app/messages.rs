@@ -216,4 +216,8 @@ pub enum Message {
     SubmitCertificateReportEndDate(Date),
     GenerateCertificateReport,
     CertificateReportGenerated(Result<PathBuf, String>),
+    //
+    ToggleGroupReportModal,
+    GroupReportGenerated(Result<PathBuf, String>),
+    GenerateGroupReport,
 }

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use chrono::NaiveDate;
 use headless_chrome::{Browser, LaunchOptionsBuilder};
 use umya_spreadsheet::{new_file, writer};
-use crate::app::state::{Certificate, Payment, UserInfo};
+use crate::app::state::{Certificate, GroupForReport, Payment, UserInfo};
 
 fn get_reports_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
     // Получаем директорию исполняемого файла
@@ -968,7 +968,7 @@ pub fn generate_certificate_excel_report(
 
     // Создаем директорию, если нет
     fs::create_dir_all(output_dir)?;
-    
+
 
 
     let filtered: Vec<_> = certificates.iter()
@@ -1025,10 +1025,362 @@ pub fn generate_certificate_excel_report(
         }
     }
 
-    writer::xlsx::write(&book, output_path)?;
+    writer::xlsx::write(&book, &output_path)?;
 
     println!("Excel отчёт по сертификатам сгенерирован");
 
     Ok(())
 }
+pub fn generate_group_report_html(
+    groups: &[GroupForReport],
+    output_path: &Path,
+) -> std::io::Result<()> {
+    use std::collections::HashMap;
+    use std::fs;
+
+    // Подсчёт количества групп по статусам
+    let mut status_counts: HashMap<String, usize> = HashMap::new();
+    // Подсчёт количества групп по курсам
+    let mut course_counts: HashMap<String, usize> = HashMap::new();
+
+    for g in groups {
+        *status_counts.entry(g.status.clone().to_string()).or_insert(0) += 1;
+        *course_counts.entry(g.course_name.clone().unwrap_or_else(|| "—".to_string())).or_insert(0) += 1;
+    }
+
+    let mut table_rows = String::new();
+    for g in groups {
+        table_rows.push_str(&format!(
+            "<tr>
+                <td colspan=\"6\"><strong>Группа:</strong> {} | <strong>Преподаватель:</strong> {} | <strong>Статус:</strong> {} | <strong>Курс:</strong> {} | <strong>Студентов:</strong> {}
+                </td>
+            </tr>",
+            g.name,
+            g.teacher_name.clone().unwrap_or_else(|| "—".to_string()),
+            g.status,
+            g.course_name.clone().unwrap_or_else(|| "—".to_string()),
+            g.student_count
+        ));
+
+        if g.students.is_empty() {
+            table_rows.push_str("<tr><td colspan=\"6\">Нет студентов в группе</td></tr>");
+        } else {
+            table_rows.push_str("<tr><td colspan=\"6\"><ul>");
+            for student in &g.students {
+                table_rows.push_str(&format!("<li>{}</li>", student));
+            }
+            table_rows.push_str("</ul></td></tr>");
+        }
+    }
+
+    let status_labels: Vec<_> = status_counts.keys().cloned().collect();
+    let status_data: Vec<_> = status_counts.values().map(|v| *v as f64).collect();
+
+    let course_labels: Vec<_> = course_counts.keys().cloned().collect();
+    let course_data: Vec<_> = course_counts.values().map(|v| *v as f64).collect();
+
+    let html = format!(r#"
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Отчёт по группам</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  :root {{
+    --bg-light: #fbf1c7;
+    --fg-light: #3c3836;
+    --bg-dark: #282828;
+    --fg-dark: #ebdbb2;
+    --border-light: #d5c4a1;
+    --border-dark: #504945;
+  }}
+  body {{
+    font-family: Arial, sans-serif;
+    background-color: var(--bg, var(--bg-dark));
+    color: var(--fg, var(--fg-dark));
+    margin: 2em;
+    transition: background-color 0.3s, color 0.3s;
+  }}
+  body.light {{
+    --bg: var(--bg-light);
+    --fg: var(--fg-light);
+    --border: var(--border-light);
+  }}
+  body.dark {{
+    --bg: var(--bg-dark);
+    --fg: var(--fg-dark);
+    --border: var(--border-dark);
+  }}
+  table {{
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 2em;
+  }}
+  td {{
+    border: 1px solid var(--border, #504945);
+    padding: 1em;
+  }}
+  ul {{
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+  }}
+  .chart-container {{
+    max-width: 600px;
+    margin: 2em auto;
+  }}
+  .theme-switch-wrapper {{
+    display: flex;
+    justify-content: flex-end;
+  }}
+  .theme-switch input {{
+    display: none;
+  }}
+  .theme-switch .slider {{
+    width: 40px;
+    height: 20px;
+    background-color: #928374;
+    display: inline-block;
+    border-radius: 34px;
+    cursor: pointer;
+    position: relative;
+    transition: background-color 0.3s;
+  }}
+  body.light .theme-switch .slider {{
+    background-color: #bdae93;
+  }}
+  .theme-switch .slider::before {{
+    content: "";
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    left: 1px;
+    top: 1px;
+    background-color: white;
+    border-radius: 50%;
+    transition: transform 0.3s;
+  }}
+  input:checked + .slider::before {{
+    transform: translateX(20px);
+  }}
+</style>
+</head>
+<body>
+  <div class="theme-switch-wrapper">
+    <label class="theme-switch" for="checkbox">
+      <input type="checkbox" id="checkbox" />
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <h1>Отчёт по группам</h1>
+
+  <table>
+    <tbody>
+      {table_rows}
+    </tbody>
+  </table>
+
+  <div class="chart-container">
+    <h2>Группы по статусу</h2>
+    <canvas id="statusChart"></canvas>
+  </div>
+
+  <div class="chart-container">
+    <h2>Группы по курсам</h2>
+    <canvas id="courseChart"></canvas>
+  </div>
+
+<script>
+  const toggleSwitch = document.getElementById('checkbox');
+  const currentTheme = localStorage.getItem('theme') || 'dark';
+  document.body.classList.add(currentTheme);
+  toggleSwitch.checked = currentTheme === 'light';
+
+  toggleSwitch.addEventListener('change', function() {{
+    if (this.checked) {{
+      document.body.classList.replace('dark', 'light');
+      localStorage.setItem('theme', 'light');
+    }} else {{
+      document.body.classList.replace('light', 'dark');
+      localStorage.setItem('theme', 'dark');
+    }}
+    updateChartsColors();
+  }});
+
+  const statusCtx = document.getElementById('statusChart').getContext('2d');
+  const courseCtx = document.getElementById('courseChart').getContext('2d');
+
+  const colorsDark = ['#fabd2f','#fe8019','#fb4934','#b8bb26','#8ec07c','#83a598'];
+  const colorsLight = ['#d79921','#d65d0e','#cc241d','#98971a','#689d6a','#458588'];
+
+  function getColors() {{
+    return document.body.classList.contains('light') ? colorsLight : colorsDark;
+  }}
+
+  let statusChart = new Chart(statusCtx, {{
+    type: 'pie',
+    data: {{
+      labels: {status_labels:?},
+      datasets: [{{
+        label: 'Количество групп по статусу',
+        data: {status_data:?},
+        backgroundColor: getColors(),
+        borderColor: document.body.classList.contains('light') ? '#f9f5d7' : '#282828',
+        borderWidth: 2
+      }}]
+    }},
+    options: {{
+      responsive: true,
+      plugins: {{
+        legend: {{
+          position: 'bottom',
+          labels: {{
+            color: getComputedStyle(document.body).getPropertyValue('--fg').trim()
+          }}
+        }},
+      }},
+    }}
+  }});
+
+  let courseChart = new Chart(courseCtx, {{
+    type: 'pie',
+    data: {{
+      labels: {course_labels:?},
+      datasets: [{{
+        label: 'Количество групп по курсам',
+        data: {course_data:?},
+        backgroundColor: getColors(),
+        borderColor: document.body.classList.contains('light') ? '#f9f5d7' : '#282828',
+        borderWidth: 2
+      }}]
+    }},
+    options: {{
+      responsive: true,
+      plugins: {{
+        legend: {{
+          position: 'bottom',
+          labels: {{
+            color: getComputedStyle(document.body).getPropertyValue('--fg').trim()
+          }}
+        }},
+      }},
+    }}
+  }});
+
+  function updateChartsColors() {{
+    let colors = getColors();
+    statusChart.data.datasets[0].backgroundColor = colors;
+    statusChart.data.datasets[0].borderColor = document.body.classList.contains('light') ? '#f9f5d7' : '#282828';
+    statusChart.options.plugins.legend.labels.color = getComputedStyle(document.body).getPropertyValue('--fg').trim();
+
+    courseChart.data.datasets[0].backgroundColor = colors;
+    courseChart.data.datasets[0].borderColor = document.body.classList.contains('light') ? '#f9f5d7' : '#282828';
+    courseChart.options.plugins.legend.labels.color = getComputedStyle(document.body).getPropertyValue('--fg').trim();
+
+    statusChart.update();
+    courseChart.update();
+  }}
+</script>
+</body>
+</html>
+"#,
+                       table_rows = table_rows,
+                       status_labels = status_labels,
+                       status_data = status_data,
+                       course_labels = course_labels,
+                       course_data = course_data
+    );
+
+    fs::write(output_path, html)
+}
+
+
+pub fn generate_group_report(
+    groups: &[GroupForReport],
+    output_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if groups.is_empty() {
+        println!("Нет групп за указанный период");
+        return Ok(());
+    }
+
+    let html_path = output_dir.join("group_report.html");
+    let pdf_path = output_dir.join("group_report.pdf");
+
+    generate_group_report_html(groups, &html_path)?;
+    generate_pdf_from_html(&html_path, &pdf_path)?;
+
+    println!("PDF-отчёт по группам сгенерирован: {:?}", pdf_path);
+    Ok(())
+}
+pub fn generate_group_excel_report(
+    groups: &[GroupForReport],
+    output_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use umya_spreadsheet::{new_file, writer};
+    use std::fs;
+
+    fs::create_dir_all(output_dir)?;
+
+    let filename = "group_report.xlsx".to_string();
+    let output_path = output_dir.join(filename);
+    let mut book = new_file();
+    let sheet = book.get_sheet_by_name_mut("Sheet1").unwrap();
+
+    sheet.get_cell_mut("A1").set_value("Отчёт по группам");
+
+    let headers = ["Название", "Уровень", "Преподаватель", "Курс", "Студентов"];
+    for (i, header) in headers.iter().enumerate() {
+        let cell_address = format!("{}5", col_to_letter(i + 1));
+        sheet.get_cell_mut(cell_address.as_str()).set_value(*header);
+    }
+
+    let mut row = 6;
+    for g in groups {
+        // Основная строка группы
+        let values = [
+            g.name.clone(),
+            g.status.clone().to_string(),
+            g.teacher_name.clone().unwrap_or_else(|| "—".to_string()),
+            g.course_name.clone().unwrap_or_else(|| "".to_string()),
+            g.student_count.to_string(),
+        ];
+
+        for (j, value) in values.iter().enumerate() {
+            let cell_address = format!("{}{}", col_to_letter(j + 1), row);
+            sheet.get_cell_mut(cell_address.as_str()).set_value(value);
+        }
+        row += 1;
+
+        // Студенты
+        if g.students.is_empty() {
+            let cell_address = format!("A{}", row);
+            sheet.get_cell_mut(cell_address.as_str())
+                .set_value("Нет студентов в группе");
+            row += 1;
+        } else {
+            let header_address = format!("A{}", row);
+            sheet.get_cell_mut(header_address.as_str())
+                .set_value("Список студентов:");
+            row += 1;
+
+            for student in &g.students {
+                let student_address = format!("B{}", row);
+                sheet.get_cell_mut(student_address.as_str())
+                    .set_value(student);
+                row += 1;
+            }
+        }
+
+        // Пустая строка после группы
+        row += 1;
+    }
+
+    writer::xlsx::write(&book, &output_path)?;
+    println!("Excel отчёт по группам сгенерирован: {:?}", output_path);
+    Ok(())
+}
+
+
 

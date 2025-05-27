@@ -100,12 +100,7 @@ pub fn certificates_screen(app: &App) -> Container<Message> {
         let start_date_picker = date_picker(
             matches!(app.date_picker_open, DatePickerOpen::Start),
             app.report_period_start,
-            Button::new(Text::new(format!(
-                "{:02}.{:02}.{:04}",
-                app.report_period_start.day,
-                app.report_period_start.month,
-                app.report_period_start.year
-            )))
+            Button::new("Начало периода")
                 .on_press(Message::ChooseCertificateReportStartDate),
             Message::CancelDatePicker,
             Message::SubmitCertificateReportStartDate,
@@ -114,26 +109,21 @@ pub fn certificates_screen(app: &App) -> Container<Message> {
         let end_date_picker = date_picker(
             matches!(app.date_picker_open, DatePickerOpen::End),
             app.report_period_end,
-            Button::new(Text::new(format!(
-                "{:02}.{:02}.{:04}",
-                app.report_period_end.day,
-                app.report_period_end.month,
-                app.report_period_end.year
-            )))
+            Button::new("Конец периода")
                 .on_press(Message::ChooseCertificateReportEndDate),
             Message::CancelDatePicker,
             Message::SubmitCertificateReportEndDate,
         );
 
         let start_date_display = Text::new(format!(
-            "Начало: {:02}.{:02}.{:04}",
+            "{:02}.{:02}.{:04}",
             app.report_period_start.day,
             app.report_period_start.month,
             app.report_period_start.year
         ));
 
         let end_date_display = Text::new(format!(
-            "Конец: {:02}.{:02}.{:04}",
+            "{:02}.{:02}.{:04}",
             app.report_period_end.day,
             app.report_period_end.month,
             app.report_period_end.year

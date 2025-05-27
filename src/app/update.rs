@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use tokio::task::spawn_blocking;
 use crate::app::state::{Assignment, AssignmentType, Config, Course, DatePickerOpen, Group, LessonWithAssignments, Level, ReportType, Screen, StudentAttendance, TextInputOrEditorInput, UserInfo, CONFIG_FILE, DEFAULT_AVATAR, PATH_TO_DB};
 use crate::db;
-use crate::doc_gen::{generate_certificate_excel_report, generate_certificate_html, generate_certificate_report, generate_payment_excel_report, generate_payment_report, generate_pdf_from_html};
+use crate::doc_gen::{generate_certificate_excel_report, generate_certificate_html, generate_certificate_report, generate_group_excel_report, generate_group_report, generate_payment_excel_report, generate_payment_report, generate_pdf_from_html};
 use crate::screens::settings::theme_to_str;
 use super::{App, Message};
 
@@ -761,7 +761,6 @@ impl App {
                     }
                 )
             }
-
             Message::CancelEditingCourse => {
                 self.show_add_course_modal = false;
                 self.editing_course = None;
@@ -1568,9 +1567,6 @@ impl App {
                 }
                 Task::none()
             }
-
-            // --- ОБРАБОТЧИКИ ДЛЯ МОДАЛКИ СЕРТИФИКАТОВ СТУДЕНТА ---
-            // Изменено: student_info теперь UserInfo
             Message::OpenStudentCertificatesModal(student_info) => {
                 println!("DEBUG: Открытие модалки сертификатов для студента: {}", student_info.name);
                 self.selected_student_for_certificates = Some(student_info.clone());
@@ -1593,7 +1589,6 @@ impl App {
                     Message::StudentCertificatesLoaded,
                 )
             }
-            // Остальные обработчики для модалки остаются такими же
             Message::StudentCertificatesLoaded(result) => {
                 self.is_loading_student_certs = false;
                 match result {
@@ -1632,13 +1627,8 @@ impl App {
                             let blocking_result = spawn_blocking(move || {
                                 let conn = Connection::open(PATH_TO_DB)
                                     .map_err(|e| format!("Не удалось открыть БД для уроков/заданий: {}", e))?;
-
-                                // --- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
-                                // Разворачиваем Option<i32> в i32. Если это None, возвращаем ошибку.
                                 let course_id = course_id_for_group_option
                                     .ok_or_else(|| "У выбранной группы нет связанного курса".to_string())?;
-                                // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-
                                 db::get_lessons_for_course_and_group(&conn, course_id, group_id_clone) // `course_id` теперь i32
                                     .map_err(|e| format!("Ошибка загрузки уроков для группы: {}", e))
 
@@ -1652,7 +1642,6 @@ impl App {
                         Message::GroupLessonsWithAssignmentsLoaded
                     ),
 
-                    // Задача 2: Загрузить проведенные сессии для группы (эта часть, скорее всего, в порядке)
                     Task::perform(
                         async move {
                             let blocking_result = spawn_blocking(move || {
@@ -1705,8 +1694,7 @@ impl App {
                             Err(e) => Err(e), // Если была ошибка при добавлении, передаем её дальше
                         }
                     },
-                    // <--- ВОТ ГЛАВНОЕ ИЗМЕНЕНИЕ: Отправляем новое сообщение с результатом
-                    Message::ConductLessonResult // Это будет callback, который преобразует Result<...> в Message
+                    Message::ConductLessonResult
                 )
             }
             Message::ConductLessonResult(result) => {
@@ -1723,7 +1711,7 @@ impl App {
                             println!("DEBUG: Sending SelectGroupForClasses for group ID: {}", group.id);
                             let group_clone = group.clone(); // Клонируем здесь, чтобы владеть данными
                             Task::perform(
-                                async move { // <--- Добавляем `move` сюда
+                                async move {
                                     Message::SelectGroupForClasses(group_clone) // Используем клонированную переменную
                                 },
                                 |msg| msg
@@ -1735,8 +1723,8 @@ impl App {
                     }
                     Err(e) => {
                         eprintln!("Ошибка проведения занятия или перезагрузки списка: {}", e);
-                        self.error_message = e.to_string(); // Убедитесь, что error_message: Option<String>
-                        Task::none() // Никаких задач при ошибке
+                        self.error_message = e.to_string();
+                        Task::none()
                     }
                 }
             }
@@ -2278,7 +2266,6 @@ impl App {
                 Task::none() // Возвращаем пустую команду
             }
             Message::AddPaymentConfirmed => {
-                // Валидация данных перед добавлением
                 if let (
                     Some(student),
                     Some(course),
@@ -2321,13 +2308,6 @@ impl App {
                 println!("Платеж успешно добавлен.");
                 self.show_add_payment_modal = false;
                 self.reset_new_payment_form();
-
-                // Теперь, помимо перезагрузки платежей,
-                // нужно перезагрузить данные, которые могли измениться:
-                // 1. Список студентов без групп (т.к. добавленный студент теперь в группе)
-                // 2. Списки курсов (т.к. места могли измениться)
-                // 3. Список групп (т.к. количество студентов в группе могло измениться)
-
                 Task::batch(vec![
                     Task::perform(
                         async {
@@ -2364,7 +2344,6 @@ impl App {
                 ])
             }
             Message::GroupsFetched(Ok(groups)) => {
-
                 self.all_groups = groups;
                 Task::none()
             }
@@ -2404,11 +2383,8 @@ impl App {
                 Task::none()
             }
             Message::NoOp => {
-                // Это сообщение ничего не делает.
-                // Просто возвращаем пустую команду.
                 Task::none()
             }
-            // Обработка клика для открытия модального окна
             Message::OpenConductLessonModal(lesson_id, group_id) => {
                 // Сохраняем контекст для модального окна
                 self.current_lesson_to_conduct = self.selected_group_lessons_with_assignments
@@ -2445,8 +2421,6 @@ impl App {
                     },
                 )
             }
-
-            // Callback, когда студенты загружены для отметки посещаемости
             Message::StudentsForAttendanceLoaded(result) => {
                 match result {
                     Ok(students) => {
@@ -2466,16 +2440,12 @@ impl App {
                     }
                 }
             }
-
-            // Переключение посещаемости студента в модальном окне
             Message::ToggleStudentAttendance(student_id) => {
                 if let Some(student) = self.students_for_attendance.iter_mut().find(|s| s.id == student_id) {
                     student.present = !student.present;
                 }
                 Task::none()
             }
-
-            // При нажатии кнопки "Сохранить посещаемость" в модальном окне
             Message::SaveAttendance => {
                 if let (Some(lesson), Some(group)) = (&self.current_lesson_to_conduct, &self.current_group_for_attendance) {
                     let lesson_id = lesson.id;
@@ -2522,8 +2492,6 @@ impl App {
                     Task::none()
                 }
             }
-
-            // Callback после сохранения посещаемости и перезагрузки PastSessions
             Message::AttendanceSavedResult(result) => {
                 println!("DEBUG: Обработка AttendanceSavedResult: {:?}", result.is_ok());
                 if result.is_err() {
@@ -2830,6 +2798,10 @@ impl App {
                 self.show_certificate_report_modal = !self.show_certificate_report_modal;
                 Task::none()
             }
+            Message::ToggleGroupReportModal => {
+                self.show_group_report_modal = !self.show_group_report_modal;
+                Task::none()
+            }
             Message::ChooseCertificateReportStartDate => {
                 self.date_picker_open = DatePickerOpen::Start;
                 Task::none()
@@ -2853,7 +2825,6 @@ impl App {
                 self.date_picker_open = DatePickerOpen::None;
                 Task::none()
             }
-
             Message::SubmitCertificateReportEndDate(date) => {
                 self.report_period_end = date;
 
@@ -2869,8 +2840,6 @@ impl App {
                 self.date_picker_open = DatePickerOpen::None;
                 Task::none()
             }
-
-
             Message::GenerateCertificateReport => {
                 let output_dir = Path::new("reports");
                 if let Err(e) = fs::create_dir_all(output_dir) {
@@ -2939,15 +2908,9 @@ impl App {
                                         let certificates = db::get_certificates_between(&conn, from_copy, to_copy)
                                             .map_err(|e| e.to_string())?;
 
-                                        let file_name = format!(
-                                            "certificate_report_{}_{}.xlsx",
-                                            from_copy.format("%Y-%m-%d"),
-                                            to_copy.format("%Y-%m-%d")
-                                        );
-                                        let path = output_dir.join(file_name);
-
-                                        generate_certificate_excel_report(&certificates, &from_copy, &to_copy, &path)
-                                            .map(|_| path)
+                                        // Передаём в функцию только путь к папке, а не полный путь к файлу!
+                                        generate_certificate_excel_report(&certificates, &from_copy, &to_copy, &output_dir)
+                                            .map(|_| output_dir.clone())
                                             .map_err(|e| format!("Ошибка генерации Excel: {}", e))
                                     })
                                         .await
@@ -2967,7 +2930,6 @@ impl App {
                     }
                 }
             }
-
             Message::CertificateReportGenerated(result) => {
                 self.show_certificate_report_modal = false;
 
@@ -2994,10 +2956,102 @@ impl App {
 
                 Task::none()
             }
+            Message::GenerateGroupReport => {
+                let output_dir = Path::new("reports");
+                if let Err(e) = fs::create_dir_all(output_dir) {
+                    eprintln!("Ошибка создания директории отчётов: {}", e);
+                    self.error_message = format!("Ошибка создания директории отчётов: {}", e);
+                    return Task::none();
+                }
 
+                // Подключаемся к БД
+                let conn = match Connection::open(PATH_TO_DB) {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        self.error_message = format!("Ошибка подключения к БД: {}", e);
+                        return Task::none();
+                    }
+                };
+
+                // Получаем все группы
+                let groups = match db::get_all_groups_for_report(&conn) {
+                    Ok(groups) => groups,
+                    Err(e) => {
+                        self.error_message = format!("Ошибка получения групп: {}", e);
+                        return Task::none();
+                    }
+                };
+
+                if groups.is_empty() {
+                    self.error_message = "Нет групп для отчёта".to_string();
+                    return Task::none();
+                }
+
+                match self.selected_report_type {
+                    Some(ReportType::PDF) => {
+                        let groups = groups.clone();
+                        let output_dir = output_dir.to_path_buf();
+                        Task::perform(
+                            async move {
+                                spawn_blocking(move || {
+                                    generate_group_report(&groups, &output_dir)
+                                        .map(|_| output_dir.join("group_report.pdf"))
+                                        .map_err(|e| format!("Ошибка генерации PDF: {}", e))
+                                }).await.unwrap_or_else(|e| Err(format!("Ошибка блокирующей задачи: {:?}", e)))
+                            },
+                            Message::GroupReportGenerated,
+                        )
+                    }
+                    Some(ReportType::Excel) => {
+                        let groups = groups.clone();
+                        let output_dir = output_dir.to_path_buf();
+                        Task::perform(
+                            async move {
+                                spawn_blocking(move || {
+                                    generate_group_excel_report(&groups, &output_dir)
+                                        .map(|_| output_dir.clone())
+                                        .map_err(|e| format!("Ошибка генерации Excel: {}", e))
+                                }).await.unwrap_or_else(|e| Err(format!("Ошибка блокирующей задачи: {:?}", e)))
+                            },
+                            Message::GroupReportGenerated,
+                        )
+                    }
+                    None => {
+                        self.error_message = "Тип отчёта не выбран".to_string();
+                        Task::none()
+                    }
+                }
+            }
+
+
+            Message::GroupReportGenerated(result) => {
+                self.show_group_report_modal = false;
+
+                match result {
+                    Ok(path) => {
+                        let success_msg = format!("Отчёт по группам успешно сгенерирован: {}", path.display());
+                        println!("{}", success_msg);
+                        self.error_message = success_msg;
+
+                        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+                        {
+                            if let Err(e) = open::that(&path) {
+                                let msg = format!("Ошибка при открытии отчёта: {}", e);
+                                self.error_message = msg.clone();
+                                eprintln!("{msg}");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.error_message = format!("Ошибка генерации отчёта по группам: {}", e);
+                        eprintln!("{}", self.error_message);
+                    }
+                }
+
+                Task::none()
+            }
 
         }
-
     }
     fn reset_new_payment_form(&mut self) {
         self.new_payment_student = None;
@@ -3051,7 +3105,6 @@ fn hash_password(password: &str) -> String {
     hasher.update(password);
     format!("{:x}", hasher.finalize())
 }
-
 async fn load_teacher_groups(teacher_email: String) -> Result<Vec<Group>, String> {
     let conn = Connection::open(PATH_TO_DB)
         .map_err(|e| format!("Failed to open database connection: {}", e))?;
