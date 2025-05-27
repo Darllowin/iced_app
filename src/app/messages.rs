@@ -208,4 +208,12 @@ pub enum Message {
     CancelDatePicker,
     ReportTypeSelected(Option<ReportType>),
     ReportGenerated(Result<PathBuf, String>),
+    //
+    ToggleCertificateReportModal,
+    ChooseCertificateReportStartDate,
+    ChooseCertificateReportEndDate,
+    SubmitCertificateReportStartDate(Date), // или какой у тебя тип даты
+    SubmitCertificateReportEndDate(Date),
+    GenerateCertificateReport,
+    CertificateReportGenerated(Result<PathBuf, String>),
 }

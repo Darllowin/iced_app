@@ -1,10 +1,10 @@
-use iced::{widget::{Button, Column, Container, Row, Stack, Text, mouse_area, Scrollable}, Alignment, Color, ContentFit, Length, Theme};
-use iced::widget::{button, horizontal_space, image, text}; // Удален PickList и Rule, если они не используются
+use iced::{widget::{Column, Container, Row, Stack, Text, mouse_area, Scrollable}, Alignment, Color, ContentFit, Length, Theme};
+use iced::widget::{button, horizontal_space, image, pick_list, Button};
 use iced::widget::container::{background, bordered_box};
 use iced::widget::image::Handle;
+use iced_aw::date_picker;
 use crate::app::{App, Message};
-use crate::app::state::{DEFAULT_AVATAR, Certificate, UserInfo}; // Импортируйте UserInfo
-// Удален 'rusqlite::Connection' так как теперь данные из app.state
+use crate::app::state::{Certificate, DatePickerOpen, ReportType, DEFAULT_AVATAR};
 
 pub fn certificates_screen(app: &App) -> Container<Message> {
     let mut main_column = Column::new().spacing(20).padding(20);
@@ -12,7 +12,10 @@ pub fn certificates_screen(app: &App) -> Container<Message> {
     // Заголовок
     main_column = main_column.push(
         Row::new()
+            .spacing(10)
             .push(Text::new("Сертификаты студентов").size(26))
+            .push(button(Text::new("Генерация отчёта"))
+                .on_press(Message::ToggleCertificateReportModal))
             .push(horizontal_space())
             .align_y(Alignment::Center)
             .width(Length::Fill)
@@ -82,6 +85,113 @@ pub fn certificates_screen(app: &App) -> Container<Message> {
         .center_y(Length::Fill);
 
     let mut ui_stack = Stack::new().push(base_ui);
+
+
+    if app.show_certificate_report_modal {
+        let report_formats = vec![ReportType::PDF, ReportType::Excel];
+        let selected_format = app.selected_report_type;
+
+        let format_picklist = pick_list(
+            report_formats.clone(),
+            selected_format,
+            |selected: ReportType| Message::ReportTypeSelected(Some(selected)),
+        );
+
+        let start_date_picker = date_picker(
+            matches!(app.date_picker_open, DatePickerOpen::Start),
+            app.report_period_start,
+            Button::new(Text::new(format!(
+                "{:02}.{:02}.{:04}",
+                app.report_period_start.day,
+                app.report_period_start.month,
+                app.report_period_start.year
+            )))
+                .on_press(Message::ChooseCertificateReportStartDate),
+            Message::CancelDatePicker,
+            Message::SubmitCertificateReportStartDate,
+        );
+
+        let end_date_picker = date_picker(
+            matches!(app.date_picker_open, DatePickerOpen::End),
+            app.report_period_end,
+            Button::new(Text::new(format!(
+                "{:02}.{:02}.{:04}",
+                app.report_period_end.day,
+                app.report_period_end.month,
+                app.report_period_end.year
+            )))
+                .on_press(Message::ChooseCertificateReportEndDate),
+            Message::CancelDatePicker,
+            Message::SubmitCertificateReportEndDate,
+        );
+
+        let start_date_display = Text::new(format!(
+            "Начало: {:02}.{:02}.{:04}",
+            app.report_period_start.day,
+            app.report_period_start.month,
+            app.report_period_start.year
+        ));
+
+        let end_date_display = Text::new(format!(
+            "Конец: {:02}.{:02}.{:04}",
+            app.report_period_end.day,
+            app.report_period_end.month,
+            app.report_period_end.year
+        ));
+
+
+        let modal_content = Column::new()
+            .spacing(15)
+            .padding(20)
+            .push(Text::new("Генерация отчёта по сертификатам").size(24))
+            .push(Text::new("Выберите период:"))
+            .push(
+                Row::new()
+                    .spacing(10)
+                    .align_y(Alignment::Center)
+                    .push(start_date_picker)
+                    .push(start_date_display),
+            )
+            .push(
+                Row::new()
+                    .spacing(10)
+                    .align_y(Alignment::Center)
+                    .push(end_date_picker)
+                    .push(end_date_display),
+            )
+            .push(
+                Row::new()
+                    .spacing(15)
+                    .align_y(Alignment::Center)
+                    .push(format_picklist)
+                    .push(
+                        Button::new(Text::new("Сгенерировать отчёт"))
+                            .on_press(Message::GenerateCertificateReport),
+                    )
+                    .push(
+                        Button::new(Text::new("Отмена"))
+                            .on_press(Message::ToggleCertificateReportModal),
+                    ),
+            );
+
+        let modal_container = Container::new(modal_content)
+            .style(move |_| bordered_box(&app.theme))
+            .padding(20)
+            .width(Length::Fixed(500.0))
+            .height(Length::Shrink);
+
+        let modal_overlay = Container::new(
+            mouse_area(Container::new(modal_container).center(Length::Fill))
+        )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_y(Length::Fill)
+            .center_x(Length::Fill)
+            .style(move |_| background(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.7 }));
+
+        ui_stack = ui_stack.push(modal_overlay);
+    }
+
 
     // --- Модальное окно сертификатов студента ---
     if app.show_student_certificates_modal {
@@ -164,3 +274,5 @@ pub fn certificates_screen(app: &App) -> Container<Message> {
         .center_x(Length::Fill)
         .center_y(Length::Fill)
 }
+
+

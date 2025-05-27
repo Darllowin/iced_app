@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use tokio::task::spawn_blocking;
 use crate::app::state::{Assignment, AssignmentType, Config, Course, DatePickerOpen, Group, LessonWithAssignments, Level, ReportType, Screen, StudentAttendance, TextInputOrEditorInput, UserInfo, CONFIG_FILE, DEFAULT_AVATAR, PATH_TO_DB};
 use crate::db;
-use crate::doc_gen::{generate_certificate_html, generate_payment_excel_report, generate_payment_report, generate_pdf_from_html};
+use crate::doc_gen::{generate_certificate_excel_report, generate_certificate_html, generate_certificate_report, generate_payment_excel_report, generate_payment_report, generate_pdf_from_html};
 use crate::screens::settings::theme_to_str;
 use super::{App, Message};
 
@@ -2707,14 +2707,21 @@ impl App {
 
             Message::GeneratePaymentReport => {
                 let output_dir = Path::new("reports");
-                fs::create_dir_all(output_dir).ok();
+                if let Err(e) = fs::create_dir_all(output_dir) {
+                    println!("Failed to create dir: {}", e);
+                    return Task::none();
+                }
 
                 if let (Some(from), Some(to)) = (
                     NaiveDate::from_ymd_opt(self.report_period_start.year, self.report_period_start.month, self.report_period_start.day),
                     NaiveDate::from_ymd_opt(self.report_period_end.year, self.report_period_end.month, self.report_period_end.day),
                 ) {
+                    println!("Date range valid: {} - {}", from, to);
+
                     match self.selected_report_type {
                         Some(ReportType::PDF) => {
+                            println!("Date range valid: {} - {}", from, to);
+
                             let filtered_payments: Vec<_> = self.payments.iter()
                                 .filter(|payment| {
                                     if let Ok(payment_date) = NaiveDate::parse_from_str(&payment.date, "%Y-%m-%d") {
@@ -2735,9 +2742,10 @@ impl App {
                             let to_str = to.format("%Y-%m-%d").to_string();
                             let output_dir = output_dir.to_path_buf();
 
-                            return Task::perform(
+                            Task::perform(
                                 async move {
                                     spawn_blocking(move || {
+                                        println!("Inside blocking task");
                                         let path = output_dir.join("payment_report.pdf");
                                         generate_payment_report(&filtered_payments, &from_str, &to_str, &output_dir).unwrap();
                                         Ok(path)
@@ -2746,10 +2754,11 @@ impl App {
                                         .unwrap_or_else(|e| Err(format!("Ошибка блокирующей задачи: {e:?}")))
                                 },
                                 Message::ReportGenerated,
-                            );
+                            )
                         }
 
                         Some(ReportType::Excel) => {
+                            println!("Generating Excel report");
                             let from_copy = from.clone();
                             let to_copy = to.clone();
                             let output_dir = output_dir.to_path_buf();
@@ -2817,6 +2826,176 @@ impl App {
                 self.selected_report_type = selected;
                 Task::none()
             }
+            Message::ToggleCertificateReportModal => {
+                self.show_certificate_report_modal = !self.show_certificate_report_modal;
+                Task::none()
+            }
+            Message::ChooseCertificateReportStartDate => {
+                self.date_picker_open = DatePickerOpen::Start;
+                Task::none()
+            }
+            Message::ChooseCertificateReportEndDate => {
+                self.date_picker_open = DatePickerOpen::End;
+                Task::none()
+            }
+            Message::SubmitCertificateReportStartDate(date) => {
+                self.report_period_start = date;
+
+                if let (Some(start), Some(end)) = (
+                    NaiveDate::from_ymd_opt(date.year, date.month, date.day),
+                    NaiveDate::from_ymd_opt(self.report_period_end.year, self.report_period_end.month, self.report_period_end.day),
+                ) {
+                    if start > end {
+                        self.report_period_end = self.report_period_start;
+                    }
+                }
+
+                self.date_picker_open = DatePickerOpen::None;
+                Task::none()
+            }
+
+            Message::SubmitCertificateReportEndDate(date) => {
+                self.report_period_end = date;
+
+                if let (Some(start), Some(end)) = (
+                    NaiveDate::from_ymd_opt(self.report_period_start.year, self.report_period_start.month, self.report_period_start.day),
+                    NaiveDate::from_ymd_opt(date.year, date.month, date.day),
+                ) {
+                    if end < start {
+                        self.report_period_start = self.report_period_end;
+                    }
+                }
+
+                self.date_picker_open = DatePickerOpen::None;
+                Task::none()
+            }
+
+
+            Message::GenerateCertificateReport => {
+                let output_dir = Path::new("reports");
+                if let Err(e) = fs::create_dir_all(output_dir) {
+                    eprintln!("Ошибка создания директории отчётов: {}", e);
+                    self.error_message = format!("Ошибка создания директории отчётов: {}", e);
+                    return Task::none();
+                }
+
+                let from = NaiveDate::from_ymd_opt(
+                    self.report_period_start.year,
+                    self.report_period_start.month,
+                    self.report_period_start.day,
+                );
+                let to = NaiveDate::from_ymd_opt(
+                    self.report_period_end.year,
+                    self.report_period_end.month,
+                    self.report_period_end.day,
+                );
+
+                match (from, to) {
+                    (Some(from), Some(to)) => match self.selected_report_type {
+                        Some(ReportType::PDF) => {
+                            println!("Генерация PDF отчёта");
+
+                            let from_copy = from.clone();
+                            let to_copy = to.clone();
+                            let output_dir = output_dir.to_path_buf();
+
+                            Task::perform(
+                                async move {
+                                    spawn_blocking(move || {
+                                        let conn = Connection::open(PATH_TO_DB)
+                                            .map_err(|e| format!("Ошибка подключения к БД: {}", e))?;
+
+                                        // Получаем сертификаты из БД за период
+                                        let certificates = db::get_certificates_between(&conn, from_copy, to_copy)
+                                            .map_err(|e| e.to_string())?;
+
+                                        if certificates.is_empty() {
+                                            return Err("Нет сертификатов за указанный период".to_string());
+                                        }
+
+                                        let from_str = from_copy.format("%Y-%m-%d").to_string();
+                                        let to_str = to_copy.format("%Y-%m-%d").to_string();
+
+                                        let path = output_dir.join("certificate_report.pdf");
+
+                                        generate_certificate_report(&certificates, &from_str, &to_str, &output_dir)
+                                            .map(|_| path)
+                                            .map_err(|e| format!("Ошибка генерации PDF: {}", e))
+                                    }).await.unwrap_or_else(|e| Err(format!("Ошибка блокирующей задачи: {:?}", e)))
+                                },
+                                Message::CertificateReportGenerated,
+                            )
+                        }
+                        Some(ReportType::Excel) => {
+                            let from_copy = from.clone();
+                            let to_copy = to.clone();
+                            let output_dir = output_dir.to_path_buf();
+
+                            Task::perform(
+                                async move {
+                                    spawn_blocking(move || {
+                                        let conn = Connection::open(PATH_TO_DB)
+                                            .map_err(|e| format!("Ошибка подключения к БД: {}", e))?;
+                                        let certificates = db::get_certificates_between(&conn, from_copy, to_copy)
+                                            .map_err(|e| e.to_string())?;
+
+                                        let file_name = format!(
+                                            "certificate_report_{}_{}.xlsx",
+                                            from_copy.format("%Y-%m-%d"),
+                                            to_copy.format("%Y-%m-%d")
+                                        );
+                                        let path = output_dir.join(file_name);
+
+                                        generate_certificate_excel_report(&certificates, &from_copy, &to_copy, &path)
+                                            .map(|_| path)
+                                            .map_err(|e| format!("Ошибка генерации Excel: {}", e))
+                                    })
+                                        .await
+                                        .unwrap_or_else(|e| Err(format!("Ошибка блокирующей задачи: {e:?}")))
+                                },
+                                Message::CertificateReportGenerated,
+                            )
+                        }
+                        None => {
+                            self.error_message = "Тип отчёта не выбран".to_string();
+                            Task::none()
+                        }
+                    },
+                    _ => {
+                        self.error_message = "Неверный период даты".to_string();
+                        Task::none()
+                    }
+                }
+            }
+
+            Message::CertificateReportGenerated(result) => {
+                self.show_certificate_report_modal = false;
+
+                match result {
+                    Ok(path) => {
+                        let success_msg = format!("Отчёт успешно сгенерирован: {}", path.display());
+                        println!("{}", success_msg);
+                        self.error_message = success_msg;
+
+                        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+                        {
+                            if let Err(e) = open::that(&path) {
+                                let msg = format!("Ошибка при открытии отчёта: {}", e);
+                                self.error_message = msg.clone();
+                                eprintln!("{msg}");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.error_message = format!("Ошибка генерации отчёта: {}", e);
+                        eprintln!("{}", self.error_message);
+                    }
+                }
+
+                Task::none()
+            }
+
+
         }
 
     }

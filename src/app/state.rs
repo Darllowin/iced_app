@@ -192,6 +192,9 @@ pub struct App {
     pub report_period_start: Date,
     pub report_period_end: Date,
     pub selected_report_type: Option<ReportType>,
+    //
+    pub show_certificate_report_modal: bool,
+
 }
 impl Default for App {
     fn default() -> Self {
@@ -330,6 +333,7 @@ impl Default for App {
             report_period_start: Default::default(),
             report_period_end: Default::default(),
             selected_report_type: None,
+            show_certificate_report_modal: false,
         }
     }
 }
@@ -340,8 +344,8 @@ pub enum ReportType {
     Excel,
 }
 
-impl std::fmt::Display for ReportType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ReportType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ReportType::PDF => write!(f, "PDF"),
             ReportType::Excel => write!(f, "Excel"),

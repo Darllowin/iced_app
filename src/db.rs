@@ -1465,3 +1465,42 @@ pub fn get_payments_between(
 
     Ok(payments)
 }
+pub fn get_certificates_between(conn: &Connection, from: NaiveDate, to: NaiveDate) -> Result<Vec<Certificate>> {
+    let mut stmt = conn.prepare(
+        "SELECT 
+            c.id, 
+            c.student_id, 
+            u.name as student_name, 
+            c.course_id, 
+            cr.title as course_title, 
+            c.issue_date, 
+            c.grade
+         FROM Certificates c
+         JOIN Users u ON u.id = c.student_id
+         JOIN Course cr ON cr.id = c.course_id
+         WHERE c.issue_date BETWEEN ?1 AND ?2
+         ORDER BY c.issue_date"
+    )?;
+
+    let from_str = from.format("%Y-%m-%d").to_string();
+    let to_str = to.format("%Y-%m-%d").to_string();
+
+    let cert_iter = stmt.query_map(params![from_str, to_str], |row| {
+        Ok(Certificate {
+            id: row.get(0)?,
+            student_id: row.get(1)?,
+            student_name: row.get(2)?,
+            course_id: row.get(3)?,
+            course_title: row.get(4)?,
+            issue_date: row.get(5)?,
+            grade: row.get(6)?,
+        })
+    })?;
+
+    let mut certs = Vec::new();
+    for cert in cert_iter {
+        certs.push(cert?);
+    }
+
+    Ok(certs)
+}
