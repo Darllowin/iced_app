@@ -248,10 +248,12 @@ pub fn generate_payment_report_html(
 ) -> std::io::Result<()> {
     use std::collections::HashMap;
     use std::fs;
+    use chrono::NaiveDate; // Убедитесь, что NaiveDate импортирован, если вы его используете
 
-    let mut type_sums: HashMap<String, f64> = HashMap::new();
+    // Изменение здесь: Теперь суммируем по course_title
+    let mut course_sums: HashMap<String, f64> = HashMap::new();
     for p in payments {
-        *type_sums.entry(p.payment_type.clone()).or_insert(0.0) += p.amount;
+        *course_sums.entry(p.course_title.clone()).or_insert(0.0) += p.amount;
     }
 
     // Преобразуем from и to в формат "дд:мм:гггг"
@@ -275,8 +277,9 @@ pub fn generate_payment_report_html(
         ));
     }
 
-    let chart_labels: Vec<_> = type_sums.keys().cloned().collect();
-    let chart_data: Vec<_> = type_sums.values().map(|v| *v).collect();
+    // Изменение здесь: Используем course_sums для меток и данных диаграммы
+    let chart_labels: Vec<_> = course_sums.keys().cloned().collect();
+    let chart_data: Vec<_> = course_sums.values().map(|v| *v).collect();
 
     let html = format!(
         r#"<!DOCTYPE html>
@@ -494,9 +497,9 @@ pub fn generate_payment_report_html(
   let chart = new Chart(ctx, {{
     type: 'pie',
     data: {{
-      labels: {labels:?},
+      labels: {labels:?}, // Теперь это названия курсов
       datasets: [{{
-        label: 'Суммы по типам',
+        label: 'Суммы по курсам', // Обновленная подпись
         data: {data:?},
         backgroundColor: getColors(),
         borderColor: document.body.classList.contains('light') ? '#fbf1c7' : '#282828',
@@ -530,7 +533,7 @@ pub fn generate_payment_report_html(
         from_formatted = from_formatted,
         to_formatted = to_formatted,
         table_rows = table_rows,
-        labels = chart_labels,
+        labels = chart_labels, // Теперь это названия курсов
         data = chart_data,
     );
 

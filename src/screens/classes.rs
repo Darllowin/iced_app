@@ -98,7 +98,7 @@ pub fn classes_screen(app: &App) -> Container<Message> {
                             Container::new(assignment_display)
                                 .padding(5)
                                 .width(Length::Fill)
-                                .style(move |_| bordered_box(&app.theme)) // Отдельная рамка для каждого задания
+                                .style(move |_| bordered_box(&app.theme.target())) // Отдельная рамка для каждого задания
                         );
                     }
                 } else {
@@ -112,7 +112,7 @@ pub fn classes_screen(app: &App) -> Container<Message> {
                     Container::new(lesson_card_content)
                         .padding(10)
                         .width(Length::Fill)
-                        .style(move |_| bordered_box(&app.theme)) // Рамка для всей карточки урока
+                        .style(move |_| bordered_box(&app.theme.target())) // Рамка для всей карточки урока
                 );
             }
         }
@@ -207,7 +207,7 @@ pub fn classes_screen(app: &App) -> Container<Message> {
                             )
                     )
             )
-                .style(move |_| bordered_box(&app.theme))
+                .style(move |_| bordered_box(&app.theme.target()))
         );
     }
 

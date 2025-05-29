@@ -2,21 +2,32 @@ use iced::{widget::{Button, Column, Container, Row, Stack, Text, TextInput, mous
 use iced::widget::{button, horizontal_space, image, pick_list, row, text, PickList, Rule};
 use iced::widget::container::{background, bordered_box};
 use iced::widget::image::Handle;
+use iced_font_awesome::fa_icon_solid;
 use crate::app::{App, Message};
 use crate::app::state::{Course, Group, GroupStatus, ReportType, UserInfo, DEFAULT_AVATAR};
+use crate::app::update::icon_button_content;
 
-fn headerbar(group: &Group) -> Row<'static, Message> {
+fn headerbar<'a>(group: &Group, app: &'a App) -> Row<'a, Message> {
     row![
         row![
-            button("Редактировать").on_press(Message::StartEditingGroup(group.clone())),
-            button("Состав").on_press(Message::OpenManageStudentsModal(group.id)),
-            button("Занятия").on_press(Message::OpenGroupLessonsModal(group.id, group.course_id.unwrap_or(0))),
+            button(icon_button_content(
+                fa_icon_solid("pen-to-square").style(move |_| text::base(&app.theme.target())),
+                "Редактировать"
+            )).on_press(Message::StartEditingGroup(group.clone())),
+            button(icon_button_content(
+                fa_icon_solid("users").style(move |_| text::base(&app.theme.target())),
+                "Состав"
+            )).on_press(Message::OpenManageStudentsModal(group.id)),
+            button(icon_button_content(
+                fa_icon_solid("book").style(move |_| text::base(&app.theme.target())),
+                "Занятия"
+            )).on_press(Message::OpenGroupLessonsModal(group.id, group.course_id.unwrap_or(0))),
         ].spacing(10),
 
         horizontal_space(),
         text(format!("{}", group.name)).size(26),
         horizontal_space(),
-        button("X").on_press(Message::DeleteGroup(group.id)),
+        button(fa_icon_solid("xmark").style(move |_| text::base(&app.theme.target()))).on_press(Message::DeleteGroup(group.id)),
     ]
         .width(Length::Fill)
 }
@@ -35,7 +46,7 @@ fn content(group: Group, app: &App) -> Column<Message> {
         Container::new(content_col)
             .padding(10)
             .width(Length::Fill)
-            .style(move |_| bordered_box(&app.theme))
+            .style(move |_| bordered_box(&app.theme.target()))
     ).spacing(10)
 }
 
@@ -59,7 +70,10 @@ pub fn groups_screen(app: &App) -> Container<Message> {
         .push(
             Row::new()
                 .push(
-                    Button::new(Text::new("Добавить группу"))
+                    Button::new(icon_button_content(
+                        fa_icon_solid("plus").style(move |_| text::base(&app.theme.target())), // Изменено здесь
+                        "Добавить группу"
+                    ))
                         .on_press(Message::ToggleAddGroupModal(true))
                 )
                 .push(
@@ -70,7 +84,10 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                         .width(Length::Fixed(400.0))
                 ).spacing(10).align_y(Alignment::Center)
                 .push(
-                    Button::new(Text::new("Отчёт")).on_press(Message::ToggleGroupReportModal)
+                    Button::new(icon_button_content(
+                        fa_icon_solid("certificate").style(move |_| text::base(&app.theme.target())), // Изменено здесь
+                        "Отчёт"
+                    )).on_press(Message::ToggleGroupReportModal)
                 )
         );
 
@@ -78,11 +95,11 @@ pub fn groups_screen(app: &App) -> Container<Message> {
         let group_content = Column::new().push(
             Container::new(
                 Column::new()
-                    .push(Container::new(headerbar(&group)).padding(10).style(move |_| bordered_box(&app.theme)))
-                    .push(Container::new(content(group.clone(), app)).style(move |_| bordered_box(&app.theme)))
+                    .push(Container::new(headerbar(&group, &app)).padding(10).style(move |_| bordered_box(&app.theme.target())))
+                    .push(Container::new(content(group.clone(), app)).style(move |_| bordered_box(&app.theme.target())))
             )
                 .padding(10)
-                .style(move |_| bordered_box(&app.theme))
+                .style(move |_| bordered_box(&app.theme.target()))
                 .width(Length::Fill)
         );
         let group_card = Container::new(group_content)
@@ -151,13 +168,14 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                         )
                         .push(horizontal_space())
                         .push(
-                            button(Text::new("Удалить"))
+                            button(fa_icon_solid("xmark")
+                                .style(move |_| text::base(&app.theme.target())))
                                 .on_press(Message::RemoveStudentFromGroup(student.id, current_group_id))
                         );
 
                     students_list_col = students_list_col.push(
                         Container::new(student_row_content)
-                            .style(move |_| bordered_box(&app.theme))
+                            .style(move |_| bordered_box(&app.theme.target()))
                             .width(Length::Fill)
                     );
                 }
@@ -180,7 +198,10 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                     ).placeholder("Выберите студента")
                 )
                 .push(
-                    button(Text::new("Добавить"))
+                    button(icon_button_content(
+                        fa_icon_solid("plus").style(move |_| text::base(&app.theme.target())),
+                        "Добавить"
+                    ))
                         .on_press(Message::AddStudentToGroup(
                             app.selected_student_to_add.as_ref().map_or(0, |s| s.id), // ID выбранного студента
                             current_group_id // ID текущей группы
@@ -197,19 +218,21 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                 .push(add_student_row) // Добавляем строку для добавления студента
                 .push(Text::new(app.group_error_message.clone().unwrap_or_default()).color(Color::from_rgb(1.0, 0.0, 0.0))) // Сообщение об ошибке
                 .push(
-                    button(Text::new("Закрыть"))
+                    button(icon_button_content(
+                        fa_icon_solid("arrow-left").style(move |_| text::base(&app.theme.target())),
+                        "Закрыть"
+                    ))
                         .on_press(Message::CloseGroupStudentsModal)
                 );
 
             let modal_container = Container::new(modal_content)
-                .style(move |_| bordered_box(&app.theme))
+                .style(move |_| bordered_box(&app.theme.target()))
                 .padding(20)
                 .height(Length::Fixed(500.0))
                 .width(Length::Fixed(600.0));
 
             let modal_overlay = Container::new(
                 mouse_area(Container::new(modal_container).center(Length::Fill))
-                    .on_press(Message::CloseGroupStudentsModal) // Теперь можно закрывать по клику вне модалки
             )
                 .width(Length::Fill).height(Length::Fill)
                 .center_y(Length::Fill)
@@ -228,8 +251,8 @@ pub fn groups_screen(app: &App) -> Container<Message> {
             selected_format,
             |selected: ReportType| Message::ReportTypeSelected(Some(selected)),
         );
-        
-        
+
+
         let modal_content = Column::new()
             .spacing(15)
             .padding(20)
@@ -241,18 +264,24 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                     .align_y(Alignment::Center)
                     .push(format_picklist)
                     .push(
-                        Button::new(Text::new("Сгенерировать отчёт"))
+                        Button::new(icon_button_content(
+                            fa_icon_solid("stamp").style(move |_| text::base(&app.theme.target())), 
+                            "Отчёт"
+                        ))
                             .on_press(Message::GenerateGroupReport),
                     )
                     .push(
-                        Button::new(Text::new("Отмена"))
+                        Button::new(icon_button_content(
+                            fa_icon_solid("arrow-left").style(move |_| text::base(&app.theme.target())), 
+                            "Отмена"
+                        ))
                             .on_press(Message::ToggleGroupReportModal),
                     ),
             )
             .push(Text::new(&app.error_message).size(24));
 
         let modal_container = Container::new(modal_content)
-            .style(move |_| bordered_box(&app.theme))
+            .style(move |_| bordered_box(&app.theme.target()))
             .padding(20)
             .width(Length::Fixed(500.0))
             .height(Length::Shrink);
@@ -343,11 +372,17 @@ pub fn groups_screen(app: &App) -> Container<Message> {
             .push(
                 Row::new()
                     .spacing(10)
-                    .push(Button::new(Text::new("Отмена")).on_press(cancel_message))
-                    .push(Button::new(Text::new(submit_button_text)).on_press(submit_message))
+                    .push(Button::new(icon_button_content(
+                        fa_icon_solid("arrow-left").style(move |_| text::base(&app.theme.target())), // Изменено здесь
+                        "Отмена"
+                    )).on_press(cancel_message))
+                    .push(Button::new(icon_button_content(
+                        fa_icon_solid("bookmark").style(move |_| text::base(&app.theme.target())), // Изменено здесь
+                        submit_button_text
+                    )).on_press(submit_message))
             );
         let modal = Container::new(modal_column)
-            .style(move |_| bordered_box(&app.theme))
+            .style(move |_| bordered_box(&app.theme.target()))
             .padding(20)
             .height(Length::Fixed(500.0))
             .width(Length::Fixed(800.0));
@@ -375,7 +410,6 @@ pub fn groups_screen(app: &App) -> Container<Message> {
         if !app.group_lessons_modal_lessons.is_empty() {
             lessons_col = lessons_col.push(Text::new("Доступные занятия").size(20).color(Color::from_rgb8(142, 192, 124)));
             for lesson in &app.group_lessons_modal_lessons {
-                // lesson.title - это String, поэтому .as_ref().map_or() не нужен
                 lessons_col = lessons_col.push(
                     Container::new(
                         Row::new()
@@ -386,7 +420,7 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                     )
                         .padding(20)
                         .width(Length::Fill)
-                        .style(move |_| bordered_box(&app.theme))
+                        .style(move |_| bordered_box(&app.theme.target()))
                 );
             }
         } else {
@@ -442,7 +476,7 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                     Container::new(session_detail_col) // Используем Column для деталей сессии
                         .padding(20)
                         .width(Length::Fill)
-                        .style(move |_| bordered_box(&app.theme))
+                        .style(move |_| bordered_box(&app.theme.target()))
                 );
             }
         } else {
@@ -454,10 +488,13 @@ pub fn groups_screen(app: &App) -> Container<Message> {
             .align_x(Alignment::Start)
             .push(Text::new(modal_title).size(24))
             .push(Scrollable::new(lessons_col).height(Length::FillPortion(1)))
-            .push(Button::new(Text::new("Закрыть")).on_press(Message::CloseGroupLessonsModal));
+            .push(Button::new(icon_button_content(
+                fa_icon_solid("arrow-left").style(move |_| text::base(&app.theme.target())), // Изменено здесь
+                "Закрыть"
+            )).on_press(Message::CloseGroupLessonsModal));
 
         let modal = Container::new(modal_content)
-            .style(move |_| bordered_box(&app.theme))
+            .style(move |_| bordered_box(&app.theme.target()))
             .padding(20)
             .height(Length::Fixed(600.0))
             .width(Length::Fixed(700.0));

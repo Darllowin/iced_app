@@ -1,10 +1,15 @@
 use iced::{widget::{column, text, text_input, button, vertical_space, Container}, Length, Center};
-use iced::widget::{row, Button, Text};
+use iced::widget::{row, Text};
 use iced_aw::{date_picker};
+use iced_font_awesome::fa_icon_solid;
 use crate::app::{App, Message};
+use crate::app::update::icon_button_content;
 
 pub fn register_screen(app: &App) -> Container<Message> {
-    let but = Button::new(Text::new("Дата рождения")).on_press(Message::ChooseDate);
+    let but = button(icon_button_content(
+        fa_icon_solid("calendar-check").style(move |_| text::base(&app.theme.target())),
+        "Дата рождения"
+    )).on_press(Message::ChooseDate);
     let content = column![
         text("Регистрация").size(30),
         text_input("Имя", &app.user_name)
@@ -28,12 +33,11 @@ pub fn register_screen(app: &App) -> Container<Message> {
                 .on_input(Message::Er)
                 .padding(10)
                 .size(18)
-                .width(Length::Fixed(200.0)), 
+                .width(Length::Fixed(175.0)), 
             date_picker(app.show_picker, app.date, but, Message::CancelDate, Message::SubmitDate),
         ]
             .spacing(10)
             .align_y(Center),
-        
         text_input("Почта", &app.user_email)
             .on_input(Message::EmailChanged)
             .padding(10)
@@ -59,13 +63,15 @@ pub fn register_screen(app: &App) -> Container<Message> {
         } else {
             Text::new("")
         },
-        button("Зарегистрироваться")
-            .on_press(Message::RegisterPressed)
-            .padding(10),
+        button(icon_button_content(
+            fa_icon_solid("id-card").style(move |_| text::base(&app.theme.target())),
+            "Зарегистрироваться"
+        )).on_press(Message::RegisterPressed).padding(10),
         vertical_space(),
-        button("Назад ко входу")
-            .on_press(Message::SwitchToLogin)
-            .padding(10),
+        button(icon_button_content(
+            fa_icon_solid("arrow-left").style(move |_| text::base(&app.theme.target())),
+            "Назад ко входу"
+        )).on_press(Message::SwitchToLogin).padding(10)
     ]
         .spacing(15)
         .width(Length::Fill)

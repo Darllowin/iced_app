@@ -4,17 +4,25 @@ use iced::{
              Alignment, Color, Element, Length
 };
 use iced::widget::container::{background, bordered_box};
-use iced::widget::{row, PickList};
+use iced::widget::{button, row, text, PickList};
 use iced_aw::date_picker;
+use iced_font_awesome::fa_icon_solid;
 use crate::app::{App, Message};
 use crate::app::state::{StudentPickListItem, CoursePickListItem, GroupPickListItem, DatePickerOpen, ReportType};
+use crate::app::update::icon_button_content;
 
 pub fn payment_screen(app: &App) -> Container<Message> {
-    let add_button = Button::new(Text::new("Добавить платеж"))
+    let add_button = Button::new(icon_button_content(
+        fa_icon_solid("plus").style(move |_| text::base(&app.theme.target())),
+        "Добавить платеж"
+    ))
         .on_press(Message::ToggleAddPaymentModal)
         .padding(10);
-    
-    let report_button = Button::new(Text::new("Сгенерировать отчёт"))
+
+    let report_button = Button::new(icon_button_content(
+        fa_icon_solid("stamp").style(move |_| text::base(&app.theme.target())),
+        "Отчёт"
+    ))
         .on_press(Message::ToggleReportModal)
         .padding(10);
 
@@ -33,7 +41,7 @@ pub fn payment_screen(app: &App) -> Container<Message> {
         let header = Row::new()
             .push(Text::new(format!("Платёж #{}", payment.id)).size(20))
             .push(horizontal_space())
-            .push(Button::new("X").on_press(Message::DeletePayment(payment.id)))
+            .push(button(fa_icon_solid("xmark").style(move |_| text::base(&app.theme.target()))).on_press(Message::DeletePayment(payment.id)))
             .width(Length::Fill)
             .spacing(10);
 
@@ -48,7 +56,7 @@ pub fn payment_screen(app: &App) -> Container<Message> {
 
         let payment_card = Container::new(
             Column::new()
-                .push(Container::new(header).style(move |_| bordered_box(&app.theme)).padding(10))
+                .push(Container::new(header).style(move |_| bordered_box(&app.theme.target())).padding(10))
                 .push(
                     Container::new(
                         Row::new()
@@ -58,7 +66,7 @@ pub fn payment_screen(app: &App) -> Container<Message> {
                         .padding(10),
                 ),
         )
-            .style(move |_| bordered_box(&app.theme))
+            .style(move |_| bordered_box(&app.theme.target()))
             .width(Length::Fill)
             .padding(10);
 
@@ -86,10 +94,16 @@ pub fn payment_screen(app: &App) -> Container<Message> {
     let mut ui_stack = Stack::new().push(base_ui);
 
     if app.show_report_modal {
-        let start_button = Button::new(Text::new("Начало периода"))
+        let start_button = Button::new(icon_button_content(
+            fa_icon_solid("calendar").style(move |_| text::base(&app.theme.target())),
+            "Начало периода"
+        ))
             .on_press(Message::ChooseStartDate);
 
-        let end_button = Button::new(Text::new("Конец периода"))
+        let end_button = Button::new(icon_button_content(
+            fa_icon_solid("calendar").style(move |_| text::base(&app.theme.target())),
+            "Конец периода"
+        ))
             .on_press(Message::ChooseEndDate);
 
         let start_date_picker = date_picker(
@@ -155,21 +169,27 @@ pub fn payment_screen(app: &App) -> Container<Message> {
                     .spacing(10)
                     .push(report_type_picklist)
                     .push(
-                        Button::new(Text::new("Сгенерировать отчёт"))
+                        Button::new(icon_button_content(
+                            fa_icon_solid("certificate").style(move |_| text::base(&app.theme.target())),
+                            "Сгенерировать отчёт"
+                        ))
                             .on_press(Message::GeneratePaymentReport),
                     )
                     .push(
-                        Button::new(Text::new("Отмена"))
+                        Button::new(icon_button_content(
+                            fa_icon_solid("arrow-left").style(move |_| text::base(&app.theme.target())),
+                            "Отмена"
+                        ))
                             .on_press(Message::ToggleReportModal),
                     ),
             );
 
         let modal_container = Container::new(modal)
-            .style(move |_| bordered_box(&app.theme))
-            .width(Length::Fixed(500.0));
+            .style(move |_| bordered_box(&app.theme.target()))
+            .width(Length::Fixed(600.0));
 
         let modal_overlay: Element<Message> = Container::new(
-            mouse_area(modal_container).on_press(Message::ToggleReportModal),
+            mouse_area(modal_container)
         )
             .width(Length::Fill)
             .height(Length::Fill)
@@ -237,9 +257,7 @@ pub fn payment_screen(app: &App) -> Container<Message> {
 
         let type_pick_list = pick_list(
             payment_types.clone(),
-            // 1. Для `selected`: Используем `and_then` с `get()` для получения `Option<&String>`
             app.selected_payment_type_idx.and_then(|i| payment_types.get(i).cloned()),
-            // 2. Для `on_selected`: Используем замыкание, которое принимает String и возвращает Message
             |selected_type_string: String| Message::NewPaymentFormTypeChanged(selected_type_string),
         )
             .placeholder("Выберите тип платежа");
@@ -263,26 +281,28 @@ pub fn payment_screen(app: &App) -> Container<Message> {
             .push(
                 Row::new()
                     .spacing(10)
-                    .push(Button::new(Text::new("Добавить")).on_press(Message::AddPaymentConfirmed))
-                    .push(Button::new(Text::new("Отмена")).on_press(Message::ToggleAddPaymentModal)),
+                    .push(Button::new(icon_button_content(
+                        fa_icon_solid("plus").style(move |_| text::base(&app.theme.target())),
+                        "Добавить"
+                    )).on_press(Message::AddPaymentConfirmed))
+                    .push(Button::new(icon_button_content(
+                        fa_icon_solid("arrow-left").style(move |_| text::base(&app.theme.target())),
+                        "Отмена"
+                    )).on_press(Message::ToggleAddPaymentModal)),
             );
-
-        // 2. Контейнер для модального окна с фиксированной шириной и стилем
+        
         let modal_container = Container::new(modal_form_content)
-            .style(move |_| bordered_box(&app.theme))
-            .width(Length::Fixed(500.0)); // <-- Здесь применяется фиксированная ширина
-        // .center_x/.y не нужны здесь, центрирование будет в родительском mouse_area
-
-        // 3. Фон-оверлей с mouse_area для кликов вне модального окна
+            .style(move |_| bordered_box(&app.theme.target()))
+            .width(Length::Fixed(500.0));
+        
         let modal_overlay_element: Element<Message> = Container::new(
-            mouse_area(modal_container) // Оборачиваем контейнер модального окна в mouse_area
-                .on_press(Message::ToggleAddPaymentModal) // Клик по mouse_area закрывает модальное окно
+            mouse_area(modal_container)
         )
-            .width(Length::Fill)  // Сам оверлей занимает всю доступную ширину/высоту
+            .width(Length::Fill) 
             .height(Length::Fill)
-            .center_x(Length::Fill) // Центрируем mouse_area (которая содержит модальное окно)
-            .center_y(Length::Fill) // по центру родителя (Stack)
-            .style(move |_| background(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.7 })) // Полупрозрачный черный фон
+            .center_x(Length::Fill) 
+            .center_y(Length::Fill) 
+            .style(move |_| background(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.7 }))
             .into();
 
         ui_stack = ui_stack.push(modal_overlay_element);

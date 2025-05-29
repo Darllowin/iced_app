@@ -2,17 +2,15 @@ use chrono::{Local, NaiveDate};
 use std::fs;
 use std::path::{Path};
 use std::str::FromStr;
-use iced::{Task};
-use iced::widget::{text_editor};
+use iced::{Alignment, Element, Renderer, Task, Theme};
+use iced::widget::{text, text_editor, Row};
 use regex::Regex;
 use rfd::FileDialog;
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use tokio::task::spawn_blocking;
-use crate::app::state::{Assignment, AssignmentType, Course, DatePickerOpen, Group,
-                        LessonWithAssignments, Level, ReportType, Screen, StudentAttendance,
-                        TextInputOrEditorInput, UserInfo, DEFAULT_AVATAR, PATH_TO_DB};
-use crate::config::{backup_database_now, save_config, theme_from_str};
+use crate::app::state::{Assignment, AssignmentType, BackupInterval, Course, DatePickerOpen, Group, LessonWithAssignments, Level, ReportType, Screen, StudentAttendance, TextInputOrEditorInput, UserInfo, DEFAULT_AVATAR, PATH_TO_DB};
+use crate::config::{backup_database_now, backup_database_now_with_config, get_last_backup_time, save_config, theme_from_str};
 use crate::db;
 use crate::doc_gen::{generate_certificate_excel_report, generate_certificate_html,
                      generate_certificate_report, generate_group_excel_report,
@@ -258,14 +256,18 @@ impl App {
             }
             Message::ThemeSelected(name) => {
                 if let Some(new_theme) = theme_from_str(name) {
-                    self.theme = new_theme;
+                    self.theme.update(new_theme.into());
                     save_config(
-                        &self.theme,
+                        &self.theme.target(), // Сохранить целевую тему
                         self.backup_interval.as_ref().map(|interval| interval.value),
                         self.backup_folder.clone(),
                         self.max_backup_count,
                     ).ok();
                 }
+                Task::none()
+            }
+            Message::ChangeTheme(event) => {
+                self.theme.update(event);
                 Task::none()
             }
             Message::ChooseDate => {
@@ -300,7 +302,7 @@ impl App {
                 Task::perform(
                     async move {
                         let result: Result<Vec<u8>, String> = spawn_blocking(move || {
-                            let Some(path_buf) = rfd::FileDialog::new().add_filter("Image", &["png", "jpg", "jpeg"]).pick_file() else {
+                            let Some(path_buf) = FileDialog::new().add_filter("Image", &["png", "jpg", "jpeg"]).pick_file() else {
                                 return Err("Выбор файла аватара отменен.".to_string());
                             };
 
@@ -590,8 +592,10 @@ impl App {
             Message::DeleteCourse(course_id) => {
                 // Эта операция должна быть асинхронной
                 let conn = Connection::open(PATH_TO_DB).unwrap();
-                db::delete_course(&conn, course_id).unwrap();
-                Task::none() // Возвращаем Task::none()
+                if let Err(err) = db::delete_course(&conn, course_id) {
+                    eprintln!("Ошибка удаления группы: {:?}", err);
+                }
+                Task::none()
             }
             Message::NewCourseLevelChanged(level) => {
                 self.new_course_level = level;
@@ -1183,10 +1187,26 @@ impl App {
                 Task::none() // Эта задача завершена
             }
             Message::DeleteGroup(id) => {
-                // Эта операция должна быть асинхронной
                 let conn = Connection::open(PATH_TO_DB).unwrap();
                 if let Err(err) = db::delete_group(&conn, id) {
                     eprintln!("Ошибка удаления группы: {:?}", err);
+                    // Здесь можно установить сообщение об ошибке в состояние приложения
+                } else {
+                    // Группа успешно удалена. Теперь перезагрузите все группы.
+                    match db::get_all_groups(&conn) { // Предполагается, что у вас есть функция db::get_all_groups
+                        Ok(groups) => {
+                            self.all_groups = groups; // Обновляем состояние приложения
+                        },
+                        Err(e) => {
+                            eprintln!("Ошибка при перезагрузке групп после удаления: {:?}", e);
+                            // Установите сообщение об ошибке, если загрузка не удалась
+                            self.group_error_message = Some("Ошибка при обновлении списка групп.".to_string());
+                        }
+                    }
+                    // Также очистите любые связанные выделения или модальные окна, если необходимо
+                    self.selected_group_for_students_name = None;
+                    self.current_manage_students_group_id = None;
+                    self.show_group_students_modal = false;
                 }
                 Task::none() // Возвращаем Task::none()
             }
@@ -2267,7 +2287,7 @@ impl App {
                 Task::none()
             }
             Message::NewPaymentFormTypeChanged(selected_type_string) => {
-                let payment_types_options = vec!["Карта".to_string(), "QR-Код".to_string()]; // Убедитесь, что это совпадает с view!
+                let payment_types_options = vec!["Карта".to_string(), "QR-Код".to_string()]; 
 
                 self.selected_payment_type_idx = payment_types_options.iter()
                     .position(|s| s == &selected_type_string);
@@ -2319,6 +2339,7 @@ impl App {
                 println!("Платеж успешно добавлен.");
                 self.show_add_payment_modal = false;
                 self.reset_new_payment_form();
+                self.error_message = "".to_string();
                 Task::batch(vec![
                     Task::perform(
                         async {
@@ -3064,7 +3085,7 @@ impl App {
             Message::BackupIntervalSelected(interval) => {
                 self.backup_interval = interval; 
                 save_config(
-                    &self.theme,
+                    &self.theme.target(),
                     self.backup_interval.as_ref().map(|i| i.value),
                     self.backup_folder.clone(),
                     self.max_backup_count,
@@ -3072,29 +3093,25 @@ impl App {
                 Task::none()
             }
             Message::BackupNowPressed => {
-                if let Err(e) = backup_database_now() {
+                let result = backup_database_now_with_config(
+                    self.backup_folder.clone(),
+                    self.max_backup_count
+                );
+
+                if let Err(e) = result {
                     println!("Ошибка резервного копирования: {}", e);
+                } else if let Some(folder) = &self.backup_folder {
+                    self.last_backup_time = get_last_backup_time(folder);
                 }
+
                 Task::none()
             }
+
             Message::SelectBackupFolder => {
                 if let Some(folder) = FileDialog::new().pick_folder() {
                     self.backup_folder = Some(folder.display().to_string());
                     save_config(
-                        &self.theme,
-                        self.backup_interval.as_ref().map(|interval| interval.value),
-                        self.backup_folder.clone(),
-                        self.max_backup_count,
-                    )
-                        .ok();
-                }
-                Task::none()
-            }
-            Message::BackupFolderSelected(folder_opt) => {
-                if let Some(folder) = folder_opt {
-                    self.backup_folder = Some(folder.clone());
-                    save_config(
-                        &self.theme,
+                        &self.theme.target(),
                         self.backup_interval.as_ref().map(|interval| interval.value),
                         self.backup_folder.clone(),
                         self.max_backup_count,
@@ -3106,7 +3123,7 @@ impl App {
             Message::MaxBackupCountSelected(count_opt) => {
                 self.max_backup_count = count_opt;
                 save_config(
-                    &self.theme,
+                    &self.theme.target(),
                     self.backup_interval.as_ref().map(|interval| interval.value),
                     self.backup_folder.clone(),
                     self.max_backup_count,
@@ -3114,6 +3131,24 @@ impl App {
                     .ok();
                 Task::none()
             }
+            Message::OpenBackupFolder => {
+                if let Some(folder) = &self.backup_folder {
+                    #[cfg(target_os = "windows")]
+                    {
+                        let _ = std::process::Command::new("explorer").arg(folder).spawn();
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        let _ = std::process::Command::new("xdg-open").arg(folder).spawn();
+                    }
+                    #[cfg(target_os = "macos")]
+                    {
+                        let _ = std::process::Command::new("open").arg(folder).spawn();
+                    }
+                }
+                Task::none()
+            }
+
         }
     }
     fn reset_new_payment_form(&mut self) {
@@ -3121,7 +3156,7 @@ impl App {
         self.new_payment_course = None;
         self.new_payment_group = None;
         self.new_payment_amount = None;
-        self.new_payment_type = "enrollment".to_string();
+        self.new_payment_type = "".to_string();
         self.students_without_group.clear();
         self.courses_with_seats.clear();
         self.groups_for_selected_course.clear();
@@ -3157,4 +3192,15 @@ async fn load_teacher_groups(teacher_email: String) -> Result<Vec<Group>, String
     db::get_groups_for_teacher(&conn, teacher_id)
         .map_err(|e| format!("Failed to load groups for teacher {}: {}", teacher_id, e))
 }
+pub fn icon_button_content<'a>(
+    icon_element: impl Into<Element<'a, Message, Theme, Renderer>>, // Виджет иконки
+    label: &'a str, // Текст метки
+) -> Row<'a, Message> {
+    Row::new()
+        .align_y(Alignment::Center)
+        .spacing(5)
+        .push(icon_element)
+        .push(text(label))
+}
+
 

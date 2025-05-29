@@ -1,10 +1,12 @@
 use crate::app::{App, Message};
 use iced::{widget::{button, column, text, text_input, vertical_space, Container}, Center, Length};
+use iced_font_awesome::fa_icon_solid;
+use crate::app::update::icon_button_content;
 
 pub fn login_screen(app: &App) -> Container<Message> {
     let content = column![
-        text("Вход").size(30),
         vertical_space(),
+        text("Вход").size(30),
         text_input("Почта", &app.user_email)
             .on_input(Message::EmailChanged)
             .padding(10)
@@ -16,14 +18,16 @@ pub fn login_screen(app: &App) -> Container<Message> {
             .size(18)
             .secure(true)
             .width(Length::Fixed(350.0)),
-        button("Войти")
-            .on_press(Message::LoginPressed)
-            .padding(10),
+        button(icon_button_content(
+            fa_icon_solid("right-to-bracket").style(move |_| text::base(&app.theme.target())),
+            "Войти"
+        )).on_press(Message::LoginPressed).padding(10),
         text(&app.error_message).size(20),
         vertical_space(),
-        button("Регистрация")
-            .on_press(Message::SwitchToRegister)
-            .padding(10),
+        button(icon_button_content(
+            fa_icon_solid("id-card").style(move |_| text::base(&app.theme.target())),
+            "Регистрация"
+        )).on_press(Message::SwitchToRegister).padding(10),
     ]
         .spacing(15)
         .width(Length::Fill)

@@ -1,12 +1,14 @@
 use std::fmt;
 use std::str::FromStr;
+use std::time::Duration;
 use iced::{Theme};
 use iced::widget::text_editor;
+use iced_anim::{spring, Animated};
 use iced_aw::date_picker::Date;
 use rusqlite::ToSql;
 use rusqlite::types::{FromSql, FromSqlError, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
-use crate::config::{load_config, theme_from_str};
+use crate::config::{get_last_backup_time, load_config, start_backup_scheduler, theme_from_str};
 
 pub const PATH_TO_DB: &str = "db_platform";
 pub const CONFIG_FILE: &str = "config.json";
@@ -20,6 +22,18 @@ pub struct BackupInterval {
 impl fmt::Display for BackupInterval {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.display)
+    }
+}
+
+impl BackupInterval {
+    pub fn duration(&self) -> Option<Duration> {
+        match self.value {
+            "daily" => Some(Duration::from_secs(60 * 60 * 24)),
+            "weekly" => Some(Duration::from_secs(60 * 60 * 24 * 7)),
+            "monthly" => Some(Duration::from_secs(60 * 60 * 24 * 30)),
+            "never" => None,
+            _ => None,
+        }
     }
 }
 // Возможные интервалы (отображение → значение)
@@ -45,7 +59,7 @@ pub struct App {
     pub user_password: String,
     pub user_password_repeat: String,
     //
-    pub theme: Theme,
+    pub theme: Animated<Theme>,
     //
     pub register_error: Option<String>,
     pub registration_success: bool,
@@ -215,7 +229,7 @@ pub struct App {
     pub backup_interval: Option<BackupInterval>,
     pub backup_folder: Option<String>,
     pub max_backup_count: Option<usize>,
-
+    pub last_backup_time: Option<String>,
 }
 impl Default for App {
     fn default() -> Self {
@@ -239,6 +253,17 @@ impl Default for App {
         let backup_folder = config.as_ref().and_then(|c| c.backup_folder.clone());
 
         let max_backup_count = config.as_ref().and_then(|c| c.max_backup_count);
+
+        let interval = config
+            .as_ref()
+            .and_then(|c| {
+                let val = c.backup_interval.as_deref().unwrap_or("never");
+                BACKUP_INTERVALS.iter().find(|i| i.value == val).cloned()
+            });
+
+        let last_backup_time = get_last_backup_time("backup");
+
+        start_backup_scheduler(interval, config.clone().unwrap().backup_folder.clone(), config.unwrap().max_backup_count);
         Self {
             error_message: "".to_string(),
             date: Date::today(),
@@ -251,10 +276,11 @@ impl Default for App {
             user_email: "".to_string(),
             user_password: "".to_string(),
             user_password_repeat: "".to_string(),
-            theme: selected_theme,
+            theme: Animated::new(selected_theme, spring::Motion::SMOOTH),
             backup_interval,
             backup_folder,
             max_backup_count,
+            last_backup_time,
             register_error: None,
             registration_success: false,
             logged_in_user: "".to_string(),
@@ -778,6 +804,7 @@ impl fmt::Display for GroupPickListItem {
 }
 
 #[derive(Serialize, Deserialize)]
+#[derive(Clone)]
 pub struct Config {
     pub theme_name: String,
     pub backup_interval: Option<String>,

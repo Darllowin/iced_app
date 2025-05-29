@@ -5,9 +5,12 @@ use iced::{
 };
 use iced::advanced::image::Handle;
 use iced::widget::container::{background, bordered_box};
-use iced::widget::{horizontal_space, image, text, PickList, Rule, button as button_widget}; // Импортируем button как button_widget, чтобы не конфликтовать с Button
+use iced::widget::{horizontal_space, image, text, PickList, Rule, button as button_widget, button};
+use iced_font_awesome::fa_icon_solid;
+// Импортируем button как button_widget, чтобы не конфликтовать с Button
 use crate::app::{App, Message};
 use crate::app::state::{DEFAULT_AVATAR, PATH_TO_DB};
+use crate::app::update::icon_button_content;
 use crate::db;
 
 pub fn user_list_screen(app: &App) -> Container<Message> {
@@ -55,12 +58,12 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
                 image(image_handle)
                     .width(Length::Fixed(120.0))
                     .height(Length::Fixed(120.0))
-                    .content_fit(ContentFit::Cover)
+                    .content_fit(ContentFit::Fill)
             } else {
                 image(DEFAULT_AVATAR)
                     .width(Length::Fixed(120.0))
                     .height(Length::Fixed(120.0))
-                    .content_fit(ContentFit::Cover)
+                    .content_fit(ContentFit::Fill)
             }
         )
             .width(Length::Fixed(120.0))
@@ -72,15 +75,24 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
                 if user.user_type == "parent".to_string() {
                     Row::new()
                         .spacing(10)
-                        .push(Button::new(Text::new("Редактировать")).on_press(Message::StartEditingUser(user.clone())))
-                        .push(Button::new(Text::new("Дети")).on_press(Message::ShowParentChildren(user.email.clone())))
+                        .push(button(icon_button_content(
+                            fa_icon_solid("file-pen").style(move |_| text::base(&app.theme.target())),
+                            "Редактировать"
+                        )).on_press(Message::StartEditingUser(user.clone())))
+                        .push(button(icon_button_content(
+                            fa_icon_solid("children").style(move |_| text::base(&app.theme.target())),
+                            "Дети"
+                        )).on_press(Message::ShowParentChildren(user.email.clone())))
                 } else {
                     Row::new()
-                        .push(Button::new(Text::new("Редактировать")).on_press(Message::StartEditingUser(user.clone())))
+                        .push(button(icon_button_content(
+                            fa_icon_solid("file-pen").style(move |_| text::base(&app.theme.target())),
+                            "Редактировать"
+                        )).on_press(Message::StartEditingUser(user.clone())))
                 }
             )
             .push(horizontal_space())
-            .push(Button::new(Text::new("X")).on_press(Message::DeleteUser(user.email.clone())))
+            .push(Button::new(fa_icon_solid("xmark").style(move |_| text::base(&app.theme.target()))).on_press(Message::DeleteUser(user.email.clone())))
             .width(Length::Fill);
 
         let mut info = Column::new()
@@ -122,13 +134,13 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
                 .spacing(20)
                 .push(avatar_user_list)
                 .push(info)
-        ).style(move |_| bordered_box(&app.theme)).width(Length::Fill);
+        ).style(move |_| bordered_box(&app.theme.target())).width(Length::Fill);
 
         list = list.push(
             Container::new(Column::new()
-                .push(Container::new(header).style(move |_| bordered_box(&app.theme)).padding(10))
+                .push(Container::new(header).style(move |_| bordered_box(&app.theme.target())).padding(10))
                 .push(user_info_widget))
-                .style(move |_| bordered_box(&app.theme))
+                .style(move |_| bordered_box(&app.theme.target()))
                 .width(Length::Fill)
                 .padding(10)
         );
@@ -162,15 +174,21 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
                 .on_input(Message::EditUserTypeChanged))
             .push(Row::new()
                 .spacing(10)
-                .push(Button::new(Text::new("Отмена")).on_press(Message::CancelEditingUser))
-                .push(Button::new(Text::new("Сохранить")).on_press(Message::SubmitEditedUser)));
+                .push(button(icon_button_content(
+                    fa_icon_solid("ban").style(move |_| text::base(&app.theme.target())),
+                    "Отмена"
+                )).on_press(Message::CancelEditingUser))
+                .push(button(icon_button_content(
+                    fa_icon_solid("bookmark").style(move |_| text::base(&app.theme.target())),
+                    "Сохранить"
+                )).on_press(Message::SubmitEditedUser)));
 
         if let Some(error_msg) = &app.edit_user_error {
             modal_content = modal_content.push(Text::new(error_msg));
         }
 
         let modal = Container::new(modal_content)
-            .style(move |_| bordered_box(&app.theme))
+            .style(move |_| bordered_box(&app.theme.target()))
             .padding(20)
             .width(Length::Fixed(400.0));
 
@@ -206,7 +224,7 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
                     image(image_handle)
                         .width(Length::Fixed(100.0))
                         .height(Length::Fixed(100.0))
-                        .content_fit(ContentFit::Fill) // или Fill, как в примере со студентами
+                        .content_fit(ContentFit::Fill) 
                 } else {
                     image(DEFAULT_AVATAR)
                         .width(Length::Fixed(100.0))
@@ -242,17 +260,17 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
                     .push(avatar_container_child)
                     .push(info)
                     .push(horizontal_space()) // Для выравнивания кнопки справа
+                    
                     .push(
-                        button_widget(Text::new("Удалить")) // Используем button_widget из-за конфликта имен
-                            .on_press(Message::DeleteChild {
-                                parent_email: app.edit_user_email.clone(), // Полагаемся на email родителя
-                                child_email: child.email.clone(),
-                            })
+                        Button::new(fa_icon_solid("xmark").style(move |_| text::base(&app.theme.target()))).on_press(Message::DeleteChild {
+                            parent_email: app.edit_user_email.clone(), // Полагаемся на email родителя
+                            child_email: child.email.clone(),
+                        })
                     );
 
                 children_list_col = children_list_col.push(
                     Container::new(row)
-                        .style(move |_| bordered_box(&app.theme))
+                        .style(move |_| bordered_box(&app.theme.target()))
                         .width(Length::Fill)
                 );
             }
@@ -274,11 +292,10 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
                     Message::SelectedChildToAddChanged,
                 ).placeholder("Выберите ребенка")
             )
-            .push(
-                button_widget(Text::new("Добавить"))
-                    .on_press(Message::AddChildToParent) // Убедитесь, что это сообщение обрабатывается
-                    .width(Length::Shrink)
-            );
+            .push(button(icon_button_content(
+                fa_icon_solid("plus").style(move |_| text::base(&app.theme.target())),
+                "Добавить"
+            )).on_press(Message::AddChildToParent)).width(Length::Shrink);
 
         let modal_content = Column::new()
             .spacing(15)
@@ -287,21 +304,17 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
             .push(scrollable_children)
             .push(Rule::horizontal(10)) // Разделитель
             .push(add_child_row)
-            .push(Text::new(app.edit_user_error.clone().unwrap_or_default()).color(Color::from_rgb(1.0, 0.0, 0.0))) // Если есть специфичная ошибка для этой модалки, используйте ее
-            .push(
-                button_widget(Text::new("Закрыть"))
-                    .on_press(Message::CloseParentChildrenModal)
-            );
+            .push(Text::new(app.edit_user_error.clone().unwrap_or_default()).color(Color::from_rgb(1.0, 0.0, 0.0)))
+            .push(Button::new(fa_icon_solid("xmark").style(move |_| text::base(&app.theme.target()))).on_press(Message::CloseParentChildrenModal));
 
         let modal_container = Container::new(modal_content)
-            .style(move |_| bordered_box(&app.theme))
+            .style(move |_| bordered_box(&app.theme.target()))
             .padding(20)
             .height(Length::Fixed(600.0)) // Увеличил высоту, чтобы было место для всего
             .width(Length::Fixed(900.0)); // Увеличил ширину для содержимого
 
         let modal_overlay = Container::new(
             mouse_area(Container::new(modal_container).center(Length::Fill))
-                .on_press(Message::CloseParentChildrenModal) // Закрытие по клику вне модалки
         )
             .width(Length::Fill).height(Length::Fill)
             .center_y(Length::Fill) // Добавлено явное центрирование

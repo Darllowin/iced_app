@@ -2,12 +2,13 @@ use iced::{widget::{column, text, button, Container}, Alignment, Color, ContentF
 use iced::widget::{image, mouse_area, row, Column, Row, Rule, Scrollable, Stack, Text};
 use iced::widget::container::{background, bordered_box};
 use iced::widget::image::Handle;
+use iced_font_awesome::fa_icon_solid;
 use crate::app::{App, Message};
 use crate::app::state::DEFAULT_AVATAR;
+use crate::app::update::icon_button_content;
 
 pub fn profile_screen(app: &App) -> Container<Message> {
 
-    // Получаем текущего пользователя из Option
     let user_data = app.current_user.as_ref();
 
     // Аватар пользователя
@@ -35,7 +36,7 @@ pub fn profile_screen(app: &App) -> Container<Message> {
     let main_profile_content = column![
         row![
             Container::new(avatar_widget)
-                .style(move |_| bordered_box(&app.theme))
+                .style(move |_| bordered_box(&app.theme.target()))
                 .padding(10),
             column![
                 text(format!("ФИО: {}", user_data.map_or("Неизвестно".to_string(), |u| u.name.clone()))).size(24),
@@ -48,12 +49,15 @@ pub fn profile_screen(app: &App) -> Container<Message> {
         .width(Length::Fill)
         .spacing(20),
         text(&app.error_message).size(10),
-        button("Выбрать аватар").on_press(Message::ChooseAvatar),
+        button(icon_button_content(
+            fa_icon_solid("pencil").style(move |_| text::base(&app.theme.target())),
+            "Изменить аватар"
+        )).on_press(Message::ChooseAvatar),
     ]
         .spacing(0);
 
     let user_info_widget = Container::new(main_profile_content)
-        .style(move |_| bordered_box(&app.theme))
+        .style(move |_| bordered_box(&app.theme.target()))
         .width(Length::Fill)
         .padding(10);
 
@@ -69,7 +73,7 @@ pub fn profile_screen(app: &App) -> Container<Message> {
                         .width(Length::Fill)
                         .center_x(Length::Fill)
                         .padding(10)
-                        .style(move |_| bordered_box(&app.theme))
+                        .style(move |_| bordered_box(&app.theme.target()))
                 );
             },
             "teacher" => {
@@ -86,8 +90,11 @@ pub fn profile_screen(app: &App) -> Container<Message> {
                     for group in &app.teacher_groups {
                         let group_row = row![
                             text(format!("Группа: {} (Курс: {})", group.name, group.course_name.as_deref().unwrap_or("Неизвестно"))).size(20).width(Length::Fill),
-                            button("Показать состав")
-                                .on_press(Message::ShowGroupStudents(group.id)), // Новое сообщение
+                            button(icon_button_content(
+                                fa_icon_solid("users").style(move |_| text::base(&app.theme.target())),
+                                "Показать состав"
+                            ))
+                                .on_press(Message::ShowGroupStudents(group.id)),
                         ]
                             .spacing(10)
                             .align_y(Alignment::Center);
@@ -96,13 +103,12 @@ pub fn profile_screen(app: &App) -> Container<Message> {
                             Container::new(group_row)
                                 .width(Length::Fill)
                                 .padding(5)
-                                .style(move |_| bordered_box(&app.theme))
+                                .style(move |_| bordered_box(&app.theme.target()))
                         );
                     }
                 }
             },
             "admin" => {
-                // Если пользователь - администратор, ничего дополнительного не отображаем
             },
             _ => {
                 // Неизвестный тип пользователя
@@ -174,7 +180,7 @@ pub fn profile_screen(app: &App) -> Container<Message> {
 
                     students_list_col = students_list_col.push(
                         Container::new(student_row_content)
-                            .style(move |_| bordered_box(&app.theme))
+                            .style(move |_| bordered_box(&app.theme.target()))
                             .width(Length::Fill)
                     );
                 }
@@ -191,12 +197,15 @@ pub fn profile_screen(app: &App) -> Container<Message> {
                 .push(scrollable_students)
                 .push(Rule::horizontal(10))
                 .push(
-                    button(Text::new("Закрыть"))
+                    button(icon_button_content(
+                        fa_icon_solid("arrow-left").style(move |_| text::base(&app.theme.target())),
+                        "Закрыть"
+                    ))
                         .on_press(Message::CloseGroupStudentsModal)
                 );
 
             let modal_container = Container::new(modal_content)
-                .style(move |_| bordered_box(&app.theme))
+                .style(move |_| bordered_box(&app.theme.target()))
                 .padding(20)
                 .height(Length::Fixed(500.0))
                 .width(Length::Fixed(600.0));

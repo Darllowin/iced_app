@@ -5,22 +5,30 @@ use iced::{
 };
 use iced::widget::container::{background, bordered_box};
 use iced::widget::{button, horizontal_space, row, text, PickList, Rule, TextEditor};
+use iced_font_awesome::fa_icon_solid;
 use rusqlite::Connection;
 use crate::app::{App, Message};
 use crate::app::state::{AssignmentType, Course, Level, TextInputOrEditorInput, PATH_TO_DB};
+use crate::app::update::icon_button_content;
 // Импортируем Lesson
 use crate::db;
 
-fn headrbar(course: Course) -> Row<'static, Message> { // Передаем тему
+fn headrbar(course: Course, app: &App) -> Row<Message> { // Передаем тему
     row![
         row![
-            button("Редактировать").on_press(Message::StartEditingCourse(course.clone())),
-            button("Занятия").on_press(Message::ShowLessonsModal(course.clone())),
+            button(icon_button_content(
+                fa_icon_solid("file-pen").style(move |_| text::base(&app.theme.target())),
+                "Редактировать"
+            )).on_press(Message::StartEditingCourse(course.clone())),
+            button(icon_button_content(
+                fa_icon_solid("person-chalkboard").style(move |_| text::base(&app.theme.target())),
+                "Занятия"
+            )).on_press(Message::ShowLessonsModal(course.clone())),
         ].spacing(10),
         horizontal_space(),
         text(format!("{}", course.title)).size(26),
         horizontal_space(),
-        button("X").on_press(Message::DeleteCourse(course.id)),
+        button(fa_icon_solid("xmark").style(move |_| text::base(&app.theme.target()))).on_press(Message::DeleteCourse(course.id)),
     ]
         .width(Length::Fill)
         .align_y(Alignment::Center)
@@ -41,7 +49,7 @@ fn content(course: Course, app: &App) -> Column<Message> {
     Column::new().push(
         Container::new(content_col)
             .width(Length::Fill)
-            .style(move |_| bordered_box(&app.theme))
+            .style(move |_| bordered_box(&app.theme.target()))
     )
 }
 
@@ -68,7 +76,10 @@ pub fn courses_screen(app: &App) -> Container<Message> {
         .push(
             Row::new()
                 .push(
-                    Button::new(Text::new("Добавить курс"))
+                    Button::new(icon_button_content(
+                        fa_icon_solid("plus").style(move |_| text::base(&app.theme.target())),
+                        "Добавить курс"
+                    ))
                         .on_press(Message::ToggleAddCourseModal(true))
                 )
                 .push(
@@ -85,7 +96,7 @@ pub fn courses_screen(app: &App) -> Container<Message> {
     for course in filtered_courses {
         let course_content = Column::new().push(
             Container::new(Column::new()
-                    .push(Container::new(headrbar(course.clone())).padding(10)).push(content(course.clone(), &app))).style(move |_| bordered_box(&app.theme))
+                    .push(Container::new(headrbar(course.clone(), &app)).padding(10)).push(content(course.clone(), &app))).style(move |_| bordered_box(&app.theme.target()))
                     
                 )
                 .padding(5)
@@ -115,13 +126,16 @@ pub fn courses_screen(app: &App) -> Container<Message> {
                     .align_y(Alignment::Center)
                     .push(Text::new(format!("{}. {}", lesson.number, lesson.title)))
                     .push(horizontal_space())
-                    .push(button("Задания").on_press(Message::ShowAssignmentsModal(lesson.clone())))
-                    .push(button("X").on_press(Message::DeleteLesson(lesson.id)));
-                col.push(Container::new(lesson_row).padding(5).width(Length::Fill).style(move |_| bordered_box(&app.theme)))
+                    .push(button(icon_button_content(
+                        fa_icon_solid("folder-open").style(move |_| text::base(&app.theme.target())),
+                        "Задания"
+                    )).on_press(Message::ShowAssignmentsModal(lesson.clone())))
+                    .push(button(fa_icon_solid("xmark").style(move |_| text::base(&app.theme.target()))).on_press(Message::DeleteLesson(lesson.id)));
+                col.push(Container::new(lesson_row).padding(5).width(Length::Fill).style(move |_| bordered_box(&app.theme.target())))
             });
 
             let scrollable_lessons = Scrollable::new(
-                Container::new(lessons_list_col).style(move |_| bordered_box(&app.theme)).padding(10).width(Length::Fill)
+                Container::new(lessons_list_col).style(move |_| bordered_box(&app.theme.target())).padding(10).width(Length::Fill)
             ).height(Length::FillPortion(3)); // Больше места для списка
 
             let add_lesson_form = Column::new()
@@ -129,7 +143,10 @@ pub fn courses_screen(app: &App) -> Container<Message> {
                 .push(Text::new("Добавить новое занятие").size(18))
                 .push(TextInput::new("Номер", &app.new_lesson_number_text).on_input(Message::NewLessonNumberChanged).width(Length::Fixed(100.0)))
                 .push(TextInput::new("Название", &app.new_lesson_title).on_input(Message::NewLessonTitleChanged).width(Length::Fill))
-                .push(button("Добавить").on_press(Message::AddLesson))
+                .push(button(icon_button_content(
+                    fa_icon_solid("plus").style(move |_| text::base(&app.theme.target())),
+                    "Добавить"
+                )).on_press(Message::AddLesson))
                 .width(Length::Fill);
 
             let mut lessons_modal_content_col = Column::new()
@@ -142,10 +159,13 @@ pub fn courses_screen(app: &App) -> Container<Message> {
             if let Some(error_msg) = &app.lesson_error_message {
                 lessons_modal_content_col = lessons_modal_content_col.push(Text::new(error_msg).size(16));
             }
-            lessons_modal_content_col = lessons_modal_content_col.push(button("Закрыть").on_press(Message::CloseLessonsModal));
+            lessons_modal_content_col = lessons_modal_content_col.push(button(icon_button_content(
+                fa_icon_solid("arrow-left").style(move |_| text::base(&app.theme.target())),
+                "Закрыть"
+            )).on_press(Message::CloseLessonsModal));
 
             let lessons_modal_container = Container::new(lessons_modal_content_col)
-                .style(move |_| bordered_box(&app.theme))
+                .style(move |_| bordered_box(&app.theme.target()))
                 .padding(20)
                 .height(Length::Fixed(600.0)) // Увеличил высоту
                 .width(Length::Fixed(800.0));
@@ -176,10 +196,13 @@ pub fn courses_screen(app: &App) -> Container<Message> {
                         .push(Text::new(format!("{} ({})", assignment.title, assignment.assignment_type)).width(Length::FillPortion(3)))
                         .push(Text::new(&assignment.description).width(Length::FillPortion(5)).height(Length::Fixed(30.0))) // Описание может быть длинным
                         .push(horizontal_space())
-                        .push(button("Открыть").on_press(Message::ShowAssignmentDetailModal(assignment.clone())))
-                        .push(button("X").on_press(Message::DeleteAssignment(assignment.id)));
+                        .push(button(icon_button_content(
+                            fa_icon_solid("folder-open").style(move |_| text::base(&app.theme.target())),
+                            "Открыть"
+                        )).on_press(Message::ShowAssignmentDetailModal(assignment.clone())))
+                        .push(button(fa_icon_solid("xmark").style(move |_| text::base(&app.theme.target()))).on_press(Message::DeleteAssignment(assignment.id)));
                     assignments_list_col = assignments_list_col.push(
-                        Container::new(assignment_row).padding(5).width(Length::Fill).style(move |_| bordered_box(&app.theme))
+                        Container::new(assignment_row).padding(5).width(Length::Fill).style(move |_| bordered_box(&app.theme.target()))
                     );
                 }
             }
@@ -201,7 +224,10 @@ pub fn courses_screen(app: &App) -> Container<Message> {
                     )
                         .placeholder("Выберите тип задания")
                 )
-                .push(button("Добавить задание").on_press(Message::AddAssignment))
+                .push(button(icon_button_content(
+                    fa_icon_solid("plus").style(move |_| text::base(&app.theme.target())),
+                    "Добавить задание"
+                )).on_press(Message::AddAssignment))
                 .width(Length::Fill);
 
             let mut assignments_modal_col = Column::new()
@@ -215,11 +241,14 @@ pub fn courses_screen(app: &App) -> Container<Message> {
             if let Some(error_msg) = &app.assignment_error_message {
                 assignments_modal_col = assignments_modal_col.push(Text::new(error_msg).size(16));
             }
-            assignments_modal_col = assignments_modal_col.push(button("Закрыть").on_press(Message::CloseAssignmentsModal));
+            assignments_modal_col = assignments_modal_col.push(button(icon_button_content(
+                fa_icon_solid("arrow-left").style(move |_| text::base(&app.theme.target())),
+                "Закрыть"
+            )).on_press(Message::CloseAssignmentsModal));
 
 
             let assignments_modal_container = Container::new(assignments_modal_col)
-                .style(move |_| bordered_box(&app.theme))
+                .style(move |_| bordered_box(&app.theme.target()))
                 .padding(20)
                 .height(Length::Fixed(600.0)) // Высота модалки заданий
                 .width(Length::Fixed(800.0));  // Ширина модалки заданий
@@ -236,49 +265,40 @@ pub fn courses_screen(app: &App) -> Container<Message> {
     // Модальное окно для ДЕТАЛЕЙ ЗАДАНИЯ 
     if app.show_assignment_detail_modal {
         if let Some(selected_assignment) = &app.selected_assignment_for_detail {
-            let detail_modal_title = format!("Редактирование: {}", app.editing_assignment_title); // Используем редактируемый заголовок
+            let detail_modal_title = format!("Редактирование: {}", app.editing_assignment_title); 
 
             let mut content_specific_to_type = Column::new().spacing(10);
-
-            // Поле для редактирования названия задания (общее для всех типов)
+            
             content_specific_to_type = content_specific_to_type
                 .push(Text::new("Название задания:").size(16))
                 .push(TextInput::new("Введите название...", &app.editing_assignment_title)
                     .on_input(Message::EditingAssignmentTitleChanged));
-
-            // Определяем, какой тип задания редактируется (сравниваем строку из БД с .to_string() от enum)
-            let assignment_type_str = &selected_assignment.assignment_type; // Это String
+            
+            let assignment_type_str = &selected_assignment.assignment_type;
 
             if *assignment_type_str == AssignmentType::Lecture.to_string() {
                 content_specific_to_type = content_specific_to_type
                     .push(Text::new("Текст лекции:").size(16))
-                    // *** ИЗМЕНЕНО: Используем TextEditor для Лекции ***
                     .push(Scrollable::new(
-                        TextEditor::new(&app.editing_assignment_description_content) // Привязываем к TextEditor контенту
-                            .placeholder("Введите текст лекции...") // Placeholder
-                            // Используем on_action и оборачиваем в TextInputOrEditorInput::TextEditor
+                        TextEditor::new(&app.editing_assignment_description_content) 
+                            .placeholder("Введите текст лекции...") 
                             .on_action(|action| Message::EditingAssignmentDescriptionChanged(TextInputOrEditorInput::TextEditor(action)))
                         ).height(Length::Fixed(300.0)) 
                     )
             } else if *assignment_type_str == AssignmentType::Practice.to_string() {
                 content_specific_to_type = content_specific_to_type
                     .push(Text::new("Описание практического задания:").size(16))
-                    // *** ИЗМЕНЕНО: Используем TextEditor для Практики ***
                     .push(Scrollable::new(
-                        TextEditor::new(&app.editing_assignment_description_content) // Привязываем к TextEditor контенту
-                            .placeholder("Введите описание...") // Placeholder
-                            // Используем on_action и оборачиваем в TextInputOrEditorInput::TextEditor
+                        TextEditor::new(&app.editing_assignment_description_content) 
+                            .placeholder("Введите описание...")
                             .on_action(|action| Message::EditingAssignmentDescriptionChanged(TextInputOrEditorInput::TextEditor(action)))
                         ).height(Length::Fixed(300.0))
                     );
              
             } else {
-                // Для неизвестных или других типов просто показываем описание
                 content_specific_to_type = content_specific_to_type
                     .push(Text::new("Описание:").size(16))
-                    // *** ИЗМЕНЕНО: Используем поле для TextInput и оборачиваем ввод ***
-                    .push(TextInput::new("...", &app.editing_assignment_description_text_input) // Привязываем к TextInput String полю
-                        // Используем on_input и оборачиваем в TextInputOrEditorInput::TextInput
+                    .push(TextInput::new("...", &app.editing_assignment_description_text_input)
                         .on_input(|s| Message::EditingAssignmentDescriptionChanged(TextInputOrEditorInput::TextInput(s))));
             }
 
@@ -286,7 +306,7 @@ pub fn courses_screen(app: &App) -> Container<Message> {
                 .spacing(15)
                 .align_x(Alignment::Start)
                 .push(Text::new(detail_modal_title).size(22))
-                .push(Container::new(Scrollable::new(content_specific_to_type)).padding(5).style(move |_| bordered_box(&app.theme)))
+                .push(Container::new(Scrollable::new(content_specific_to_type)).padding(5).style(move |_| bordered_box(&app.theme.target())))
                 .push(Rule::horizontal(10));
 
             if let Some(error_msg) = &app.assignment_edit_error_message {
@@ -295,13 +315,19 @@ pub fn courses_screen(app: &App) -> Container<Message> {
 
             let buttons_row = Row::new()
                 .spacing(10)
-                .push(button("Отмена").on_press(Message::CloseAssignmentDetailModal))
-                .push(button("Сохранить").on_press(Message::SaveEditedAssignment));
+                .push(button(icon_button_content(
+                    fa_icon_solid("arrow-left").style(move |_| text::base(&app.theme.target())),
+                    "Отмена"
+                )).on_press(Message::CloseAssignmentDetailModal))
+                .push(button(icon_button_content(
+                    fa_icon_solid("bookmark").style(move |_| text::base(&app.theme.target())),
+                    "Сохранить"
+                )).on_press(Message::SaveEditedAssignment));
 
             detail_modal_col = detail_modal_col.push(buttons_row.align_y(Alignment::End)); // Выравнивание ряда кнопок
 
             let detail_modal_container = Container::new(detail_modal_col)
-                .style(move |_| bordered_box(&app.theme))
+                .style(move |_| bordered_box(&app.theme.target()))
                 .padding(20)
                 .height(Length::Shrink) // Автоматическая высота, но не более экрана
                 .width(Length::Fixed(700.0)); // Ширина модалки редактирования
@@ -315,8 +341,6 @@ pub fn courses_screen(app: &App) -> Container<Message> {
         }
     }
 
-
-    // --- Модальное окно для добавления/редактирования КУРСА ---
     if app.show_add_course_modal {
         let is_editing = app.editing_course.is_some();
         let modal_title_text = if is_editing { "Редактировать курс" } else { "Новый курс" };
@@ -381,12 +405,18 @@ pub fn courses_screen(app: &App) -> Container<Message> {
             .push(Text::new(app.course_error_message.clone().unwrap_or_default()))
             .push(
                 Row::new().spacing(10)
-                    .push(Button::new(Text::new("Отмена")).on_press(cancel_message.clone()))
-                    .push(Button::new(Text::new(submit_button_text)).on_press(submit_message))
+                    .push(Button::new(icon_button_content(
+                        fa_icon_solid("arrow-left").style(move |_| text::base(&app.theme.target())),
+                        "Отмена"
+                    )).on_press(cancel_message.clone()))
+                    .push(Button::new(icon_button_content(
+                        fa_icon_solid("bookmark").style(move |_| text::base(&app.theme.target())),
+                        submit_button_text
+                    )).on_press(submit_message))
             );
 
         let course_modal_container = Container::new(modal_content_col)
-            .style(move |_| bordered_box(&app.theme))
+            .style(move |_| bordered_box(&app.theme.target()))
             .padding(20).width(Length::Fixed(400.0));
 
         let course_modal_overlay = Container::new(

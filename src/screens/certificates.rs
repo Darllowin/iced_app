@@ -1,10 +1,12 @@
 use iced::{widget::{Column, Container, Row, Stack, Text, mouse_area, Scrollable}, Alignment, Color, ContentFit, Length, Theme};
-use iced::widget::{button, horizontal_space, image, pick_list, Button};
+use iced::widget::{button, horizontal_space, image, pick_list, text, Button};
 use iced::widget::container::{background, bordered_box};
 use iced::widget::image::Handle;
 use iced_aw::date_picker;
+use iced_font_awesome::fa_icon_solid;
 use crate::app::{App, Message};
-use crate::app::state::{Certificate, DatePickerOpen, ReportType, DEFAULT_AVATAR};
+use crate::app::state::{DatePickerOpen, ReportType, DEFAULT_AVATAR};
+use crate::app::update::icon_button_content;
 
 pub fn certificates_screen(app: &App) -> Container<Message> {
     let mut main_column = Column::new().spacing(20).padding(20);
@@ -14,8 +16,10 @@ pub fn certificates_screen(app: &App) -> Container<Message> {
         Row::new()
             .spacing(10)
             .push(Text::new("Сертификаты студентов").size(26))
-            .push(button(Text::new("Генерация отчёта"))
-                .on_press(Message::ToggleCertificateReportModal))
+            .push(button(icon_button_content(
+                fa_icon_solid("certificate").style(move |_| text::base(&app.theme.target())),
+                "Генерация отчёта"
+            )).on_press(Message::ToggleCertificateReportModal))
             .push(horizontal_space())
             .align_y(Alignment::Center)
             .width(Length::Fill)
@@ -60,15 +64,18 @@ pub fn certificates_screen(app: &App) -> Container<Message> {
                         .push(Text::new(format!("Количество сертификатов: {}", student_info.child_count.unwrap_or(0))).size(16))
                 )
                 .push(horizontal_space())
+                
                 .push(
                     // Передаем UserInfo студента при нажатии кнопки
-                    button(Text::new("Посмотреть сертификаты"))
-                        .on_press(Message::OpenStudentCertificatesModal(student_info.clone()))
+                    button(icon_button_content(
+                        fa_icon_solid("certificate").style(move |_| text::base(&app.theme.target())),
+                        "Посмотреть сертификаты"
+                    )).on_press(Message::OpenStudentCertificatesModal(student_info.clone()))
                 );
 
             student_list_column = student_list_column.push(
                 Container::new(student_card_content)
-                    .style(move |_| bordered_box(&app.theme))
+                    .style(move |_| bordered_box(&app.theme.target()))
                     .width(Length::Fill)
             );
         }
@@ -100,8 +107,10 @@ pub fn certificates_screen(app: &App) -> Container<Message> {
         let start_date_picker = date_picker(
             matches!(app.date_picker_open, DatePickerOpen::Start),
             app.report_period_start,
-            Button::new("Начало периода")
-                .on_press(Message::ChooseCertificateReportStartDate),
+            button(icon_button_content(
+                fa_icon_solid("calendar").style(move |_| text::base(&app.theme.target())),
+                "Начало периода"
+            )).on_press(Message::ChooseCertificateReportStartDate),
             Message::CancelDatePicker,
             Message::SubmitCertificateReportStartDate,
         );
@@ -109,8 +118,10 @@ pub fn certificates_screen(app: &App) -> Container<Message> {
         let end_date_picker = date_picker(
             matches!(app.date_picker_open, DatePickerOpen::End),
             app.report_period_end,
-            Button::new("Конец периода")
-                .on_press(Message::ChooseCertificateReportEndDate),
+            button(icon_button_content(
+                fa_icon_solid("calendar").style(move |_| text::base(&app.theme.target())),
+                "Конец периода"
+            )).on_press(Message::ChooseCertificateReportEndDate),
             Message::CancelDatePicker,
             Message::SubmitCertificateReportEndDate,
         );
@@ -155,19 +166,23 @@ pub fn certificates_screen(app: &App) -> Container<Message> {
                     .align_y(Alignment::Center)
                     .push(format_picklist)
                     .push(
-                        Button::new(Text::new("Сгенерировать отчёт"))
-                            .on_press(Message::GenerateCertificateReport),
+                        button(icon_button_content(
+                            fa_icon_solid("certificate").style(move |_| text::base(&app.theme.target())),
+                            "Сгенерировать отчёт"
+                        )).on_press(Message::GenerateCertificateReport)
                     )
                     .push(
-                        Button::new(Text::new("Отмена"))
-                            .on_press(Message::ToggleCertificateReportModal),
+                        button(icon_button_content(
+                            fa_icon_solid("arrow-left").style(move |_| text::base(&app.theme.target())),
+                            "Отмена"
+                        )).on_press(Message::ToggleCertificateReportModal)
                     ),
             );
 
         let modal_container = Container::new(modal_content)
-            .style(move |_| bordered_box(&app.theme))
+            .style(move |_| bordered_box(&app.theme.target()))
             .padding(20)
-            .width(Length::Fixed(500.0))
+            .width(Length::Fixed(550.0))
             .height(Length::Shrink);
 
         let modal_overlay = Container::new(
@@ -216,14 +231,16 @@ pub fn certificates_screen(app: &App) -> Container<Message> {
                                 ))
                                 .push(
                                     // НОВАЯ КНОПКА: Генерировать сертификат
-                                    button(Text::new("Сгенерировать сертификат"))
-                                        .on_press(Message::GenerateCertificatePdf(cert_clone, student_clone))
+                                    button(icon_button_content(
+                                        fa_icon_solid("stamp").style(move |_| text::base(&app.theme.target())),
+                                        "Сгенерировать сертификат"
+                                    )).on_press(Message::GenerateCertificatePdf(cert_clone, student_clone))
                                 )
                                 
                         )
                             .padding(10)
                             .width(Length::Fill)
-                            .style(move |_| bordered_box(&app.theme))
+                            .style(move |_| bordered_box(&app.theme.target()))
                     );
                 }
             }
@@ -239,15 +256,17 @@ pub fn certificates_screen(app: &App) -> Container<Message> {
                 .push(scrollable_certs)
                 .push(Text::new(app.error_message.clone()).color(Color::from_rgb(1.0, 0.0, 0.0)))
                 .push(
-                    button(Text::new("Закрыть"))
-                        .on_press(Message::CloseStudentCertificatesModal)
+                    button(icon_button_content(
+                        fa_icon_solid("arrow-left").style(move |_| text::base(&app.theme.target())),
+                        "Закрыть"
+                    )).on_press(Message::CloseStudentCertificatesModal)
                 );
 
             let modal_container = Container::new(modal_content)
-                .style(move |_| bordered_box(&app.theme))
+                .style(move |_| bordered_box(&app.theme.target()))
                 .padding(20)
-                .height(Length::Fixed(500.0))
-                .width(Length::Fixed(600.0));
+                .height(Length::Fixed(550.0))
+                .width(Length::Fixed(850.0));
 
             let modal_overlay = Container::new(
                 mouse_area(Container::new(modal_container).center(Length::Fill))

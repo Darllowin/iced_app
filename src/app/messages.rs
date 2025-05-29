@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use iced_anim::Event;
 use iced_aw::date_picker::Date;
 use crate::app::state::{Assignment, AssignmentType, BackupInterval, Certificate, Course, CoursePickListItem, Group, GroupPickListItem, GroupStatus, LessonWithAssignments, Level, PastSession, Payment, ReportType, StudentAttendance, StudentPickListItem, TextInputOrEditorInput, UserInfo};
 
@@ -28,6 +29,7 @@ pub enum Message {
     Logout,
     //
     ThemeSelected(&'static str),
+    ChangeTheme(iced_anim::Event<iced::Theme>),
     //
     ChooseDate,
     SubmitDate(Date),
@@ -223,6 +225,6 @@ pub enum Message {
     BackupIntervalSelected(Option<BackupInterval>),
     BackupNowPressed,
     SelectBackupFolder,
-    BackupFolderSelected(Option<String>),
     MaxBackupCountSelected(Option<usize>),
+    OpenBackupFolder,
 }
