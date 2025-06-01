@@ -192,9 +192,9 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                 .push(Text::new("Добавить студента:").size(18))
                 .push(
                     PickList::new(
-                        app.students_without_group.clone(), // Список студентов без группы
+                        app.students_without_group.clone(),
                         app.selected_student_to_add.clone(),
-                        Message::SelectedStudentToAddChanged, // Сообщение при выборе студента
+                        |student| Message::SelectedStudentToAddChanged(Some(student)), // Сообщение при выборе студента
                     ).placeholder("Выберите студента")
                 )
                 .push(

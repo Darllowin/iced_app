@@ -9,8 +9,8 @@ use rfd::FileDialog;
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use tokio::task::spawn_blocking;
-use crate::app::state::{Assignment, AssignmentType, BackupInterval, Course, DatePickerOpen, Group, LessonWithAssignments, Level, ReportType, Screen, StudentAttendance, TextInputOrEditorInput, UserInfo, DEFAULT_AVATAR, PATH_TO_DB};
-use crate::config::{backup_database_now, backup_database_now_with_config, get_last_backup_time, save_config, theme_from_str};
+use crate::app::state::{Assignment, AssignmentType, Course, DatePickerOpen, Group, LessonWithAssignments, Level, ReportType, Screen, StudentAttendance, TextInputOrEditorInput, UserInfo, DEFAULT_AVATAR, PATH_TO_DB};
+use crate::config::{backup_database_now_with_config, get_last_backup_time, save_config, theme_from_str};
 use crate::db;
 use crate::doc_gen::{generate_certificate_excel_report, generate_certificate_html,
                      generate_certificate_report, generate_group_excel_report,
@@ -464,6 +464,7 @@ impl App {
                         self.show_group_students_modal = false;
                     }
                 }
+                self.selected_student_to_add = None;
                 Task::none()
             },
             Message::CloseGroupStudentsModal => {
@@ -1312,12 +1313,14 @@ impl App {
                     },
                 )
             }
-            Message::SelectedStudentToAddChanged(student) => { // <--- 'student' теперь UserInfo напрямую
-                println!("DEBUG: Выбран студент для добавления: {:?}", student.name); // Доступ к .name напрямую
-                self.selected_student_to_add = Some(student); // Оберните его в Some() перед присвоением Option<UserInfo>
-                self.group_error_message = None; // Сброс ошибки, если пользователь выбирает нового студента
+            Message::SelectedStudentToAddChanged(student_opt) => {
+                if let Some(student) = &student_opt {
+                    println!("DEBUG: Выбран студент для добавления: {:?}", student.name);
+                }
+                self.selected_student_to_add = student_opt; 
+                self.group_error_message = None;
                 Task::none()
-            },
+            }
             Message::RemoveStudentFromGroup(student_id, group_id) => {
                 println!("DEBUG: Попытка удалить студента ID: {} из группы ID: {}", student_id, group_id);
 
@@ -1335,8 +1338,7 @@ impl App {
                             .await
                             .unwrap_or_else(|join_err| Err(format!("Ошибка выполнения задачи удаления студента: {:?}", join_err)))
                     },
-                    // <--- ДОБАВЛЯЕМ 'move' СЮДА
-                    move |result| { // 'move' гарантирует, что group_id_for_result_closure перемещается в это замыкание
+                    move |result| {
                         match result {
                             Ok(_) => {
                                 println!("DEBUG: Студент успешно удален. Перезагружаем списки.");
@@ -1357,8 +1359,7 @@ impl App {
             Message::StudentsAndGroupsReloaded(group_id, teacher_id) => {
                 // 1. Перезагрузка студентов в модальном окне
                 let command1 = Task::perform(
-                    async move { // <--- ДОБАВЬТЕ `move` ЗДЕСЬ
-                        // Теперь group_id принадлежит этому асинхронному блоку
+                    async move {
                         let conn = Connection::open(PATH_TO_DB).map_err(|e| format!("Не удалось открыть БД: {}", e))?;
                         db::get_students_in_group(&conn, group_id)
                             .map(|students| (group_id, students))
@@ -1367,19 +1368,29 @@ impl App {
                     Message::GroupStudentsLoaded,
                 );
 
-                // 2. Перезагрузка списка всех групп учителя (для обновления student_count)
+                // 2. Перезагрузка списка всех групп учителя
                 let command2 = Task::perform(
                     async move {
                         spawn_blocking(move || {
                             let conn = Connection::open(PATH_TO_DB).map_err(|e| format!("Не удалось открыть БД: {}", e))?;
-                            db::get_all_groups(&conn) // <--- ВЫЗЫВАЕМ get_all_groups
+                            db::get_all_groups(&conn)
                                 .map_err(|e| format!("Ошибка загрузки всех групп: {}", e))
                         }).await.unwrap_or_else(|j| Err(format!("Join error: {:?}", j)))
                     },
-                    Message::AllGroupsLoaded, // <--- ИСПОЛЬЗУЕМ AllGroupsLoaded
+                    Message::AllGroupsLoaded,
                 );
 
-                Task::batch(vec![command1, command2])
+                // ✅ 3. Перезагрузка студентов без группы
+                let command3 = Task::perform(
+                    async move {
+                        let conn = Connection::open(PATH_TO_DB).map_err(|e| format!("Не удалось открыть БД: {}", e))?;
+                        db::get_students_without_group(&conn)
+                            .map_err(|e| format!("Ошибка загрузки студентов без группы: {}", e))
+                    },
+                    Message::StudentsWithoutGroupLoaded,
+                );
+
+                Task::batch(vec![command1, command2, command3])
             }
             Message::ShowParentChildren(parent_email) => {
                 // Эта операция должна быть асинхронной

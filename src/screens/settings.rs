@@ -11,7 +11,6 @@ use crate::config::theme_to_str;
 use iced_anim::Animation;
 use iced_font_awesome::fa_icon_solid;
 use crate::app::update::icon_button_content;
-// Добавьте этот импорт
 
 pub fn settings_screen(app: &App) -> Container<Message> {
     let current_theme_name = theme_to_str(app.theme.target()); // Используйте app.theme.target() для начального выбора

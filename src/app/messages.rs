@@ -160,7 +160,7 @@ pub enum Message {
     CloseGroupStudentsModal, // Закрыть модальное окно
 
     AddStudentToGroup(i32, i32),
-    SelectedStudentToAddChanged(UserInfo),
+    SelectedStudentToAddChanged(Option<UserInfo>),
     StudentsAndGroupsReloaded(i32, i32), // (group_id, teacher_id)
     AllGroupsLoaded(Result<Vec<Group>, String>),
     // Payment

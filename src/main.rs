@@ -24,7 +24,7 @@ async fn main() -> iced::Result {
         .theme(|app: &App| app.theme.value().clone())
         .font(REQUIRED_FONT_BYTES)
         .window(window_settings)
-        .settings(settings)
+        //.settings(settings)
         .centered()
         .run()
     
