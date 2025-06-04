@@ -1,9 +1,9 @@
-use std::fs;
-use std::path::{Path, PathBuf};
+use crate::app::state::{Certificate, GroupForReport, Payment, UserInfo};
 use chrono::NaiveDate;
 use headless_chrome::{Browser, LaunchOptionsBuilder};
+use std::fs;
+use std::path::{Path, PathBuf};
 use umya_spreadsheet::{new_file, writer};
-use crate::app::state::{Certificate, GroupForReport, Payment, UserInfo};
 
 fn get_reports_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
     // Получаем директорию исполняемого файла
@@ -246,9 +246,9 @@ pub fn generate_payment_report_html(
     to: &str,
     output_path: &Path,
 ) -> std::io::Result<()> {
+    use chrono::NaiveDate;
     use std::collections::HashMap;
-    use std::fs;
-    use chrono::NaiveDate; // Убедитесь, что NaiveDate импортирован, если вы его используете
+    use std::fs; // Убедитесь, что NaiveDate импортирован, если вы его используете
 
     // Изменение здесь: Теперь суммируем по course_title
     let mut course_sums: HashMap<String, f64> = HashMap::new();
@@ -551,7 +551,8 @@ pub fn generate_payment_report(
     let from_date = NaiveDate::parse_from_str(from, "%Y-%m-%d")?;
     let to_date = NaiveDate::parse_from_str(to, "%Y-%m-%d")?;
 
-    let filtered: Vec<_> = payments.iter()
+    let filtered: Vec<_> = payments
+        .iter()
         .filter(|p| {
             NaiveDate::parse_from_str(&p.date, "%Y-%m-%d")
                 .map(|d| d >= from_date && d <= to_date)
@@ -586,7 +587,6 @@ pub fn generate_payment_excel_report(
     to: &NaiveDate,
     _output_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-
     let reports_dir = get_reports_dir()?;
 
     // Формируем имя файла с датами, например "payment_report_2025-05-01_2025-05-26.xlsx"
@@ -597,7 +597,8 @@ pub fn generate_payment_excel_report(
 
     // Заголовок
     sheet.get_cell_mut("A1").set_value("Отчёт по платежам");
-    sheet.get_cell_mut("A2")
+    sheet
+        .get_cell_mut("A2")
         .set_value(format!("Период: {} — {}", from, to));
 
     // Заголовки таблицы
@@ -940,7 +941,6 @@ pub fn generate_certificate_report_html(
     fs::write(output_path, html)
 }
 
-
 pub fn generate_certificate_report(
     certificates: &[Certificate],
     from: &str,
@@ -972,9 +972,8 @@ pub fn generate_certificate_excel_report(
     // Создаем директорию, если нет
     fs::create_dir_all(output_dir)?;
 
-
-
-    let filtered: Vec<_> = certificates.iter()
+    let filtered: Vec<_> = certificates
+        .iter()
         .filter(|c| {
             NaiveDate::parse_from_str(&c.issue_date, "%Y-%m-%d")
                 .map(|d| d >= *from && d <= *to)
@@ -995,7 +994,8 @@ pub fn generate_certificate_excel_report(
 
     // Заголовок
     sheet.get_cell_mut("A1").set_value("Отчёт по сертификатам");
-    sheet.get_cell_mut("A2")
+    sheet
+        .get_cell_mut("A2")
         .set_value(format!("Период: {} — {}", from, to));
 
     // Заголовки таблицы
@@ -1047,8 +1047,12 @@ pub fn generate_group_report_html(
     let mut course_counts: HashMap<String, usize> = HashMap::new();
 
     for g in groups {
-        *status_counts.entry(g.status.clone().to_string()).or_insert(0) += 1;
-        *course_counts.entry(g.course_name.clone().unwrap_or_else(|| "—".to_string())).or_insert(0) += 1;
+        *status_counts
+            .entry(g.status.clone().to_string())
+            .or_insert(0) += 1;
+        *course_counts
+            .entry(g.course_name.clone().unwrap_or_else(|| "—".to_string()))
+            .or_insert(0) += 1;
     }
 
     let mut table_rows = String::new();
@@ -1082,7 +1086,8 @@ pub fn generate_group_report_html(
     let course_labels: Vec<_> = course_counts.keys().cloned().collect();
     let course_data: Vec<_> = course_counts.values().map(|v| *v as f64).collect();
 
-    let html = format!(r#"
+    let html = format!(
+        r#"
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -1288,16 +1293,15 @@ pub fn generate_group_report_html(
 </body>
 </html>
 "#,
-                       table_rows = table_rows,
-                       status_labels = status_labels,
-                       status_data = status_data,
-                       course_labels = course_labels,
-                       course_data = course_data
+        table_rows = table_rows,
+        status_labels = status_labels,
+        status_data = status_data,
+        course_labels = course_labels,
+        course_data = course_data
     );
 
     fs::write(output_path, html)
 }
-
 
 pub fn generate_group_report(
     groups: &[GroupForReport],
@@ -1321,8 +1325,8 @@ pub fn generate_group_excel_report(
     groups: &[GroupForReport],
     output_dir: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use umya_spreadsheet::{new_file, writer};
     use std::fs;
+    use umya_spreadsheet::{new_file, writer};
 
     fs::create_dir_all(output_dir)?;
 
@@ -1359,18 +1363,21 @@ pub fn generate_group_excel_report(
         // Студенты
         if g.students.is_empty() {
             let cell_address = format!("A{}", row);
-            sheet.get_cell_mut(cell_address.as_str())
+            sheet
+                .get_cell_mut(cell_address.as_str())
                 .set_value("Нет студентов в группе");
             row += 1;
         } else {
             let header_address = format!("A{}", row);
-            sheet.get_cell_mut(header_address.as_str())
+            sheet
+                .get_cell_mut(header_address.as_str())
                 .set_value("Список студентов:");
             row += 1;
 
             for student in &g.students {
                 let student_address = format!("B{}", row);
-                sheet.get_cell_mut(student_address.as_str())
+                sheet
+                    .get_cell_mut(student_address.as_str())
                     .set_value(student);
                 row += 1;
             }
@@ -1384,6 +1391,3 @@ pub fn generate_group_excel_report(
     println!("Excel отчёт по группам сгенерирован: {:?}", output_path);
     Ok(())
 }
-
-
-

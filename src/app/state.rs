@@ -1,14 +1,15 @@
-use std::fmt;
-use std::str::FromStr;
-use std::time::Duration;
-use iced::{Theme};
+use crate::config::{get_last_backup_time, load_config, start_backup_scheduler, theme_from_str};
+use iced::Theme;
 use iced::widget::text_editor;
-use iced_anim::{spring, Animated};
+use iced_anim::{Animated, spring};
 use iced_aw::date_picker::Date;
 use rusqlite::ToSql;
 use rusqlite::types::{FromSql, FromSqlError, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
-use crate::config::{get_last_backup_time, load_config, start_backup_scheduler, theme_from_str};
+use std::fmt;
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::time::Duration;
 
 pub const PATH_TO_DB: &str = "db_platform";
 pub const CONFIG_FILE: &str = "config.json";
@@ -38,10 +39,22 @@ impl BackupInterval {
 }
 // Возможные интервалы (отображение → значение)
 pub const BACKUP_INTERVALS: [BackupInterval; 4] = [
-    BackupInterval { display: "Никогда", value: "never" },
-    BackupInterval { display: "Каждый день", value: "daily" },
-    BackupInterval { display: "Каждую неделю", value: "weekly" },
-    BackupInterval { display: "Каждый месяц", value: "monthly" },
+    BackupInterval {
+        display: "Никогда",
+        value: "never",
+    },
+    BackupInterval {
+        display: "Каждый день",
+        value: "daily",
+    },
+    BackupInterval {
+        display: "Каждую неделю",
+        value: "weekly",
+    },
+    BackupInterval {
+        display: "Каждый месяц",
+        value: "monthly",
+    },
 ];
 
 pub struct App {
@@ -65,6 +78,7 @@ pub struct App {
     pub registration_success: bool,
     pub logged_in_user: String,
     pub error_message: String,
+    pub choose_avatar_message: String,
     //
     pub user_avatar_data: Option<Vec<u8>>,
     //
@@ -74,7 +88,6 @@ pub struct App {
     pub new_course_total_seats: i32,
     pub new_course_seats: i32,
     pub new_course_price: f64,
-    //pub new_course_instructor: Option<String>,
     pub new_course_level: Level,
     // Добавлены поля для редактирования курса
     pub editing_course: Option<Course>,
@@ -127,20 +140,14 @@ pub struct App {
 
     pub group_filter_text: String,
 
-    //pub selected_group_id: Option<i32>,
     pub is_manage_students_modal_open: bool,
-    //pub group_students: Vec<UserInfo>,
-    //pub all_students: Vec<String>,
     pub selected_student_to_add: Option<UserInfo>,
-    //pub user_group_name: Option<String>,
-    //pub logged_in_user_id: Option<i32>,
 
     pub show_children_modal: bool,
     pub parent_children: Vec<UserInfo>,
     pub available_children: Vec<UserInfo>,
     pub selected_child_to_add: Option<UserInfo>,
 
-    //pub course_modal_view: CourseModalView,
     pub course_error_message: Option<String>, // Ошибки, специфичные для модалки курса
 
     pub show_assignments_modal: bool,
@@ -171,7 +178,7 @@ pub struct App {
 
     pub selected_group_lessons_with_assignments: Vec<LessonWithAssignments>,
     pub course_id_to_title: std::collections::HashMap<i32, String>,
-    
+
     pub all_courses: Vec<Course>,
     pub past_sessions_for_group: Vec<PastSession>, // Для отображения списка прошедших занятий
 
@@ -199,7 +206,7 @@ pub struct App {
     pub new_payment_course: Option<CoursePickListItem>,
     pub new_payment_group: Option<GroupPickListItem>,
     pub new_payment_amount: Option<f64>, // Будет заполняться автоматически
-    pub new_payment_type: String, // Например, "enrollment" или "monthly"
+    pub new_payment_type: String,        // Например, "enrollment" или "monthly"
     pub courses_with_seats: Vec<Course>,
     pub groups_for_selected_course: Vec<Group>,
     // Для picklist'ов может понадобиться отслеживать выбранный индекс
@@ -208,14 +215,14 @@ pub struct App {
     pub show_conduct_lesson_modal: bool, // Для управления видимостью модального окна
     pub students_for_attendance: Vec<StudentAttendance>, // Для хранения данных о студентах в модальном окне
     pub current_lesson_to_conduct: Option<LessonWithAssignments>, // Хранит урок, который проводится
-    pub current_group_for_attendance: Option<Group>, // Хранит группу для отметки посещаемости
+    pub current_group_for_attendance: Option<Group>,     // Хранит группу для отметки посещаемости
     //
     pub students_with_certificates: Vec<UserInfo>,
     pub show_student_certificates_modal: bool, // Флаг для показа модалки сертификатов студента
     //
     pub selected_student_for_certificates: Option<UserInfo>,
     pub selected_student_certs: Vec<Certificate>, // Сертификаты выбранного студента
-    pub is_loading_student_certs: bool, // Флаг загрузки сертификатов студента
+    pub is_loading_student_certs: bool,           // Флаг загрузки сертификатов студента
     //
     pub date_picker_open: DatePickerOpen,
     pub show_report_modal: bool,
@@ -240,30 +247,30 @@ impl Default for App {
             .and_then(|c| theme_from_str(&c.theme_name))
             .unwrap_or(Theme::GruvboxDark);
 
-        let backup_interval = config
-            .as_ref()
-            .and_then(|c| {
-                let val = c.backup_interval.as_deref().unwrap_or("");
-                BACKUP_INTERVALS
-                    .iter()
-                    .find(|interval| interval.value.eq_ignore_ascii_case(val))
-                    .cloned()
-            });
+        let backup_interval = config.as_ref().and_then(|c| {
+            let val = c.backup_interval.as_deref().unwrap_or("");
+            BACKUP_INTERVALS
+                .iter()
+                .find(|interval| interval.value.eq_ignore_ascii_case(val))
+                .cloned()
+        });
 
         let backup_folder = config.as_ref().and_then(|c| c.backup_folder.clone());
 
         let max_backup_count = config.as_ref().and_then(|c| c.max_backup_count);
 
-        let interval = config
-            .as_ref()
-            .and_then(|c| {
-                let val = c.backup_interval.as_deref().unwrap_or("never");
-                BACKUP_INTERVALS.iter().find(|i| i.value == val).cloned()
-            });
+        let interval = config.as_ref().and_then(|c| {
+            let val = c.backup_interval.as_deref().unwrap_or("never");
+            BACKUP_INTERVALS.iter().find(|i| i.value == val).cloned()
+        });
 
         let last_backup_time = get_last_backup_time("backup");
 
-        start_backup_scheduler(interval, config.clone().unwrap().backup_folder.clone(), config.unwrap().max_backup_count);
+        start_backup_scheduler(
+            interval,
+            config.clone().unwrap().backup_folder.clone(),
+            config.unwrap().max_backup_count,
+        );
         Self {
             error_message: "".to_string(),
             date: Date::today(),
@@ -404,6 +411,7 @@ impl Default for App {
             selected_report_type: None,
             show_certificate_report_modal: false,
             show_group_report_modal: false,
+            choose_avatar_message: "".to_string(),
         }
     }
 }
@@ -422,7 +430,6 @@ impl fmt::Display for ReportType {
         }
     }
 }
-
 
 pub enum DatePickerOpen {
     None,
@@ -453,7 +460,9 @@ impl FromSql for GroupStatus {
         match s {
             "Активна" => Ok(GroupStatus::Active),
             "Неактивна" => Ok(GroupStatus::Inactive),
-            _ => Err(FromSqlError::Other(format!("Неизвестный статус группы: {}", s).into())),
+            _ => Err(FromSqlError::Other(
+                format!("Неизвестный статус группы: {}", s).into(),
+            )),
         }
     }
 }
@@ -477,7 +486,7 @@ pub struct Certificate {
 #[derive(Debug, Clone)]
 pub struct StudentAttendanceStatus {
     pub student_id: i32,
-    pub student_name: String, // Имя студента
+    pub student_name: String,   // Имя студента
     pub present_status: String, // "Present" или "Absent"
 }
 
@@ -491,16 +500,15 @@ pub struct StudentAttendance {
 pub struct Payment {
     pub id: i32,
     pub student_id: i32,
-    pub date: String, 
+    pub date: String,
     pub amount: f64,
-    pub payment_type: String, 
+    pub payment_type: String,
     pub course_id: i32,
     pub group_id: i32,
     pub student_name: String,
     pub course_title: String,
     pub group_name: String,
 }
-
 
 #[derive(Debug, Clone, Eq, Hash, PartialOrd, Ord)]
 pub struct UserInfo {
@@ -510,10 +518,9 @@ pub struct UserInfo {
     pub birthday: String,
     pub user_type: String, // Теперь соответствует полю "Type" в БД
     pub avatar_data: Option<Vec<u8>>,
-    pub group_id: Option<String>,      // Это поле может быть, но оно всегда будет None из Users
-    pub child_count: Option<i32>,   // Это поле может быть, но оно всегда будет None из Users
+    pub group_id: Option<String>, // Это поле может быть, но оно всегда будет None из Users
+    pub child_count: Option<i32>, // Это поле может быть, но оно всегда будет None из Users
 }
-
 
 // Для PickList:
 // Чтобы PickList мог отобразить пользователя
@@ -531,8 +538,7 @@ impl PartialEq for UserInfo {
     }
 }
 
-#[derive(Clone, Debug)]
-#[derive(PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Group {
     pub id: i32,
     pub name: String,
@@ -570,8 +576,7 @@ impl fmt::Display for Group {
     }
 }
 
-#[derive(Clone, Debug)]
-#[derive(PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GroupForReport {
     pub id: i32,
     pub name: String,
@@ -645,10 +650,7 @@ pub enum AssignmentType {
 }
 
 impl AssignmentType {
-    pub const ALL: &'static [AssignmentType] = &[
-        AssignmentType::Lecture,
-        AssignmentType::Practice,
-    ];
+    pub const ALL: &'static [AssignmentType] = &[AssignmentType::Lecture, AssignmentType::Practice];
 }
 
 // Реализация Display для отображения в PickList и преобразования в строку
@@ -673,7 +675,7 @@ impl PartialEq for Lesson {
 
 #[derive(Debug, Clone)]
 pub struct LessonWithAssignments {
-    pub id: i32,          // ID урока из таблицы Lessons
+    pub id: i32, // ID урока из таблицы Lessons
     pub course_id: i32,
     pub number: i32,
     pub title: String,
@@ -704,16 +706,14 @@ pub struct ProvenLesson {
     pub assignments: Vec<Assignment>,
 }
 
-
-#[derive(Debug, Clone)]
-#[derive(PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Course {
     pub id: i32,
     pub title: String,
     pub description: Option<String>,
     pub level: Option<String>,
     pub total_seats: Option<i32>,
-    pub seats: Option<i32>, 
+    pub seats: Option<i32>,
     pub price: Option<f64>,
     pub lesson_count: i32,
 }
@@ -735,20 +735,20 @@ impl Default for Level {
     }
 }
 impl Level {
-    pub const ALL: &'static [Level] = &[
-        Level::Beginner,
-        Level::Intermediate,
-        Level::Advanced,
-    ];
+    pub const ALL: &'static [Level] = &[Level::Beginner, Level::Intermediate, Level::Advanced];
 }
 
 impl fmt::Display for Level {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self {
-            Level::Beginner => "Начальный",
-            Level::Intermediate => "Средний",
-            Level::Advanced => "Продвинутый",
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                Level::Beginner => "Начальный",
+                Level::Intermediate => "Средний",
+                Level::Advanced => "Продвинутый",
+            }
+        )
     }
 }
 
@@ -772,7 +772,8 @@ pub struct StudentPickListItem {
     pub name: String,
 }
 
-impl fmt::Display for StudentPickListItem { // Используем импортированный fmt
+impl fmt::Display for StudentPickListItem {
+    // Используем импортированный fmt
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)
     }
@@ -803,8 +804,7 @@ impl fmt::Display for GroupPickListItem {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
     pub theme_name: String,
     pub backup_interval: Option<String>,
@@ -823,5 +823,5 @@ pub enum Screen {
     GroupList,
     Classes,
     Payment,
-    Certificates
+    Certificates,
 }

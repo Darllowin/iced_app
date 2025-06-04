@@ -1,21 +1,32 @@
 [package]
 name = "iced-rs_app"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]
 iced = { version = "0.13.1", features = ["image", "tokio"] }
 iced_font_awesome = "0.2.1"
-iced_aw = { version = "0.12.2",default-features = false, features = ["date_picker"] }
+iced_aw = { version = "0.12.2", default-features = false, features = [
+    "date_picker",
+] }
 iced_anim = "0.2.1"
 serde_json = "1.0.140"
 serde = { version = "1.0.219", features = ["derive"] }
 rusqlite = { version = "0.35.0", features = ["bundled"] }
 sha2 = "0.10.9"
-rfd = { version = "0.15.3", default-features = false, features = ["xdg-portal", "tokio"] }
+rfd = { version = "0.15.3", default-features = false, features = [
+    "xdg-portal",
+    "tokio",
+] }
 regex = "1.11.1"
-tokio = { version = "1.45.0", features = ["rt-multi-thread", "macros", "sync", "rt", "full"] }
-image = { version = "0.25.6", features = ["png" , "jpeg"] }
+tokio = { version = "1.45.0", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "rt",
+    "full",
+] }
+image = { version = "0.25.6", features = ["png", "jpeg"] }
 chrono = "0.4.41"
 open = "5.3.2"
 headless_chrome = "1.0.17"

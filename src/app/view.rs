@@ -1,8 +1,11 @@
-use iced::{Element, Length};
-use iced::widget::{Column, Container, Row};
-use crate::app::state::Screen;
-use crate::screens::{certificates_screen, classes_screen, courses_screen, groups_screen, login_screen, nav_menu, payment_screen, profile_screen, register_screen, settings_screen, user_list_screen};
 use super::{App, Message};
+use crate::app::state::Screen;
+use crate::screens::{
+    certificates_screen, classes_screen, courses_screen, groups_screen, login_screen, nav_menu,
+    payment_screen, profile_screen, register_screen, settings_screen, user_list_screen,
+};
+use iced::widget::{Column, Container, Row};
+use iced::{Element, Length};
 
 impl App {
     pub fn view(&self) -> Row<Message> {
@@ -12,14 +15,14 @@ impl App {
                 // Левое меню (sidebar)
                 if self.current_screen != Screen::Login && self.current_screen != Screen::Register {
                     Container::new(nav_menu(self))
-                        .width(Length::Fixed(200.0)) // Фиксированная ширина меню
+                        .width(Length::Fixed(210.0)) // Фиксированная ширина меню
                         .height(Length::Fill)
                         .padding(10)
                 } else {
                     Container::new(Column::new()) // Пустой контейнер, если экран входа
                         .width(Length::Fixed(0.0))
                         .height(Length::Fill)
-                }
+                },
             )
             .push(
                 // Основной контент
@@ -35,7 +38,7 @@ impl App {
                     Screen::Payment => payment_screen(self),
                     Screen::Certificates => certificates_screen(self),
                 }
-                    .width(Length::Fill),
+                .width(Length::Fill),
             )
             .into()
     }
