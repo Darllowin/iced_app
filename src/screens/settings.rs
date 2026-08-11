@@ -1,6 +1,6 @@
 // settings_screen.rs
 use crate::app::{App, Message};
-use iced::widget::{button, container, pick_list, row, text_input, vertical_space, Row};
+use iced::widget::{button, container, pick_list, row, text_input, Row};
 use iced::{
     widget::{column, text, Container, tooltip, Space},
     Length, Theme, Element, Border,
@@ -30,7 +30,7 @@ pub fn settings_screen(app: &App) -> Container<Message> {
                 })
                 .placeholder("Выберите тему"),
                 palette_grid(app.theme.value().extended_palette()),
-                vertical_space(),
+                Space::new().height(Length::Fill),
                 
             ].spacing(10).padding(10),
             column![
@@ -142,7 +142,7 @@ fn palette_grid<'a>(palette: &Extended) -> Element<'a, Message> {
 
 fn pair_square<'a>(name: String, pair: Pair) -> Element<'a, Message> {
     tooltip(
-        Container::new(Space::new(Length::Shrink, Length::Shrink))
+        Container::new(Space::new())
             .width(Length::Fixed(48.0))
             .height(Length::Fixed(48.0))
             .style(move |_| container::Style {

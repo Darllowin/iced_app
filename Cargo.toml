@@ -4,33 +4,30 @@ version = "1.0.0"
 edition = "2024"
 
 [dependencies]
-iced = { version = "0.13.1", features = ["image", "tokio"] }
-iced_font_awesome = "0.2.1"
-iced_aw = { version = "0.12.2", default-features = false, features = [
+iced = { version = "0.14.0", features = [ "image", "tokio" ] }
+iced_font_awesome = "0.4.3"
+iced_aw = { version = "0.14.1", default-features = false, features = [
     "date_picker",
 ] }
-iced_anim = "0.2.1"
-serde_json = "1.0.140"
-serde = { version = "1.0.219", features = ["derive"] }
-rusqlite = { version = "0.35.0", features = ["bundled"] }
-sha2 = "0.10.9"
-rfd = { version = "0.15.3", default-features = false, features = [
-    "xdg-portal",
-    "tokio",
-] }
-regex = "1.11.1"
-tokio = { version = "1.45.0", features = [
+iced_anim = "0.3.1"
+serde_json = "1.0.151"
+serde = { version = "1.0.229", features = ["derive"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+sha2 = "0.11.0"
+rfd = { version = "0.17.2"}
+regex = "1.13.1"
+tokio = { version = "1.53.1", features = [
     "rt-multi-thread",
     "macros",
     "sync",
     "rt",
     "full",
 ] }
-image = { version = "0.25.6", features = ["png", "jpeg"] }
-chrono = "0.4.41"
-open = "5.3.2"
-headless_chrome = "1.0.17"
-umya-spreadsheet = "2.3.0"
+image = { version = "0.25.10", features = ["png", "jpeg"] }
+chrono = "0.4.45"
+open = "5.4.1"
+headless_chrome = "1.0.22"
+umya-spreadsheet = "3.0.1"
 
 [target.x86_64-pc-windows-msvc]
 runner = "wine"

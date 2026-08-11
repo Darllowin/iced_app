@@ -8,8 +8,7 @@ use iced::widget::{PickList, button, row, text};
 use iced::{
     Alignment, Color, Element, Length,
     widget::{
-        Button, Column, Container, Row, Scrollable, Space, Stack, Text, horizontal_space,
-        mouse_area, pick_list,
+        Button, Column, Container, Row, Scrollable, Space, Stack, Text, mouse_area, pick_list,
     },
 };
 use iced_aw::date_picker;
@@ -34,14 +33,14 @@ pub fn payment_screen(app: &App) -> Container<Message> {
         .spacing(15)
         .push(Text::new("Список платежей").size(30))
         .push(row![add_button, report_button,].spacing(10))
-        .push(Space::with_height(10));
+        .push(Space::new().height(10));
 
     let mut payment_cards = Column::new().spacing(15);
 
     for payment in &app.payments {
         let header = Row::new()
             .push(Text::new(format!("Платёж #{}", payment.id)).size(20))
-            .push(horizontal_space())
+            .push(Space::new().width(Length::Fill))
             .push(
                 button(fa_icon_solid("xmark").style(move |_| text::base(&app.theme.target())))
                     .on_press(Message::DeletePayment(payment.id)),

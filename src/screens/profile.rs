@@ -3,7 +3,7 @@ use crate::app::update::icon_button_content;
 use crate::app::{App, Message};
 use iced::widget::container::{background, bordered_box};
 use iced::widget::image::Handle;
-use iced::widget::{Column, Row, Rule, Scrollable, Stack, Text, image, mouse_area, row};
+use iced::widget::{Column, Row, rule, Scrollable, Stack, Text, image, mouse_area, row};
 use iced::{
     Alignment, Color, ContentFit, Length, Theme,
     widget::{Container, button, column, text},
@@ -223,7 +223,7 @@ pub fn profile_screen(app: &App) -> Container<Message> {
                 .align_x(Alignment::Start)
                 .push(Text::new(modal_title_text).size(22))
                 .push(scrollable_students)
-                .push(Rule::horizontal(10))
+                .push(rule::horizontal(10.0))
                 .push(
                     button(icon_button_content(
                         fa_icon_solid("arrow-left").style(move |_| text::base(&app.theme.target())),

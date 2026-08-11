@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use iced_anim::Event;
 use iced_aw::date_picker::Date;
 use crate::app::state::{Assignment, AssignmentType, BackupInterval, Certificate, Course, CoursePickListItem, Group, GroupPickListItem, GroupStatus, LessonWithAssignments, Level, PastSession, Payment, ReportType, StudentAttendance, StudentPickListItem, TextInputOrEditorInput, UserInfo};
 

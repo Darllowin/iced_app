@@ -1,5 +1,5 @@
 use iced::{widget::{Column, Container, Row, Stack, Text, mouse_area, Scrollable}, Alignment, Color, ContentFit, Length, Theme};
-use iced::widget::{button, horizontal_space, image, pick_list, text, Button};
+use iced::widget::{button, image, pick_list, text, Space};
 use iced::widget::container::{background, bordered_box};
 use iced::widget::image::Handle;
 use iced_aw::date_picker;
@@ -20,7 +20,7 @@ pub fn certificates_screen(app: &App) -> Container<Message> {
                 fa_icon_solid("certificate").style(move |_| text::base(&app.theme.target())),
                 "Генерация отчёта"
             )).on_press(Message::ToggleCertificateReportModal))
-            .push(horizontal_space())
+            .push(Space::new().width(Length::Fill))
             .align_y(Alignment::Center)
             .width(Length::Fill)
             .padding([0, 20])
@@ -63,7 +63,7 @@ pub fn certificates_screen(app: &App) -> Container<Message> {
                         // Используем child_count для отображения количества сертификатов
                         .push(Text::new(format!("Количество сертификатов: {}", student_info.child_count.unwrap_or(0))).size(16))
                 )
-                .push(horizontal_space())
+                .push(Space::new().width(Length::Fill))
                 
                 .push(
                     // Передаем UserInfo студента при нажатии кнопки

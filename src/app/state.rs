@@ -7,7 +7,6 @@ use rusqlite::ToSql;
 use rusqlite::types::{FromSql, FromSqlError, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 

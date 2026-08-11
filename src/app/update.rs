@@ -20,6 +20,7 @@ use regex::Regex;
 use rfd::FileDialog;
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
+use sha2::digest::FixedOutput;
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
@@ -3688,7 +3689,7 @@ fn hash_password(password: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(password);
     hasher.update(password);
-    format!("{:x}", hasher.finalize())
+    hasher.finalize_fixed().iter().map(|b| format!("{:02x}", b)).collect()
 }
 async fn load_teacher_groups(teacher_email: String) -> Result<Vec<Group>, String> {
     let conn = Connection::open(PATH_TO_DB)

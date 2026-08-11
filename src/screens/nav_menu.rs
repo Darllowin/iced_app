@@ -1,5 +1,5 @@
 use iced::{widget::{button, column}, Length};
-use iced::widget::{text, vertical_space, Container};
+use iced::widget::{text, Space, Container};
 use iced_font_awesome::{fa_icon_solid};
 use crate::app::{Message, App};
 use crate::app::update::icon_button_content;
@@ -30,7 +30,7 @@ pub fn nav_menu(app: &App) -> Container<Message> {
             fa_icon_solid("stamp").style(move |_| text::base(&app.theme.target())),
             "Сертификаты"
         )).on_press(Message::GoToCertificates).width(Length::Fill),
-        vertical_space(),
+        Space::new().height(Length::Fill),
         button(icon_button_content(
             fa_icon_solid("gear").style(move |_| text::base(&app.theme.target())),
             "Настройки"
@@ -47,7 +47,7 @@ pub fn nav_menu(app: &App) -> Container<Message> {
             fa_icon_solid("address-card").style(move |_| text::base(&app.theme.target())),
             "Профиль"
         )).on_press(Message::GoToProfile).width(Length::Fill),
-        vertical_space(),
+        Space::new().height(Length::Fill),
         button(icon_button_content(
             fa_icon_solid("gear").style(move |_| text::base(&app.theme.target())),
             "Настройки"
@@ -68,7 +68,7 @@ pub fn nav_menu(app: &App) -> Container<Message> {
             fa_icon_solid("person-chalkboard").style(move |_| text::base(&app.theme.target())),
             "Занятия"
         )).on_press(Message::GoToClasses).width(Length::Fill),
-        vertical_space(),
+        Space::new().height(Length::Fill),
         button(icon_button_content(
             fa_icon_solid("gear").style(move |_| text::base(&app.theme.target())),
             "Настройки"

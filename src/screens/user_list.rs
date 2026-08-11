@@ -1,7 +1,7 @@
 use iced::advanced::image::Handle;
 use iced::widget::container::{background, bordered_box};
 use iced::widget::{
-    PickList, Rule, button as button_widget, button, horizontal_space, image, text,
+    PickList, rule, button, image, text, Space,
 };
 use iced::{
     Alignment, Length,
@@ -105,7 +105,7 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
                     .on_press(Message::StartEditingUser(user.clone())),
                 )
             })
-            .push(horizontal_space())
+            .push(Space::new().width(Length::Fill))
             .push(
                 Button::new(fa_icon_solid("xmark").style(move |_| text::base(&app.theme.target())))
                     .on_press(Message::DeleteUser(user.email.clone())),
@@ -297,7 +297,7 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
                     .align_y(Alignment::Center)
                     .push(avatar_container_child)
                     .push(info)
-                    .push(horizontal_space()) // Для выравнивания кнопки справа
+                    .push(Space::new().width(Length::Fill)) // Для выравнивания кнопки справа
                     .push(
                         Button::new(
                             fa_icon_solid("xmark").style(move |_| text::base(&app.theme.target())),
@@ -348,7 +348,7 @@ pub fn user_list_screen(app: &App) -> Container<Message> {
             .align_x(Alignment::Start) // Выравнивание по левому краю
             .push(Text::new(modal_title_text).size(22))
             .push(scrollable_children)
-            .push(Rule::horizontal(10)) // Разделитель
+            .push(rule::horizontal(10.0)) // Разделитель
             .push(add_child_row)
             .push(
                 Text::new(app.edit_user_error.clone().unwrap_or_default())

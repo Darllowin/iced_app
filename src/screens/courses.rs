@@ -4,7 +4,7 @@ use iced::{
     Alignment, Length
 };
 use iced::widget::container::{background, bordered_box};
-use iced::widget::{button, horizontal_space, row, text, PickList, Rule, TextEditor};
+use iced::widget::{button, row, text, PickList, rule, Space, TextEditor};
 use iced_font_awesome::fa_icon_solid;
 use rusqlite::Connection;
 use crate::app::{App, Message};
@@ -25,9 +25,9 @@ fn headrbar(course: Course, app: &App) -> Row<Message> { // Передаем т�
                 "Занятия"
             )).on_press(Message::ShowLessonsModal(course.clone())),
         ].spacing(10),
-        horizontal_space(),
+        Space::new().width(Length::Fill),
         text(format!("{}", course.title)).size(26),
-        horizontal_space(),
+        Space::new().width(Length::Fill),
         button(fa_icon_solid("xmark").style(move |_| text::base(&app.theme.target()))).on_press(Message::DeleteCourse(course.id)),
     ]
         .width(Length::Fill)
@@ -125,7 +125,7 @@ pub fn courses_screen(app: &App) -> Container<Message> {
                     .spacing(10)
                     .align_y(Alignment::Center)
                     .push(Text::new(format!("{}. {}", lesson.number, lesson.title)))
-                    .push(horizontal_space())
+                        .push(Space::new().width(Length::Fill))
                     .push(button(icon_button_content(
                         fa_icon_solid("folder-open").style(move |_| text::base(&app.theme.target())),
                         "Задания"
@@ -153,7 +153,7 @@ pub fn courses_screen(app: &App) -> Container<Message> {
                 .spacing(15)
                 .push(Text::new(modal_title_text).size(24))
                 .push(scrollable_lessons)
-                .push(Rule::horizontal(10)) // Разделитель
+                .push(rule::horizontal(10.0)) // Разделитель
                 .push(add_lesson_form);
 
             if let Some(error_msg) = &app.lesson_error_message {
@@ -195,7 +195,7 @@ pub fn courses_screen(app: &App) -> Container<Message> {
                         .align_y(Alignment::Center)
                         .push(Text::new(format!("{} ({})", assignment.title, assignment.assignment_type)).width(Length::FillPortion(3)))
                         .push(Text::new(&assignment.description).width(Length::FillPortion(5)).height(Length::Fixed(30.0))) // Описание может быть длинным
-                        .push(horizontal_space())
+                    .push(Space::new().width(Length::Fill))
                         .push(button(icon_button_content(
                             fa_icon_solid("folder-open").style(move |_| text::base(&app.theme.target())),
                             "Открыть"
@@ -235,7 +235,7 @@ pub fn courses_screen(app: &App) -> Container<Message> {
                 .align_x(Alignment::Start) // Выравниваем по левому краю
                 .push(Text::new(assignments_modal_title_text).size(22))
                 .push(scrollable_assignments)
-                .push(Rule::horizontal(10)) // Разделитель
+                .push(rule::horizontal(10.0)) // Разделитель
                 .push(add_assignment_form);
 
             if let Some(error_msg) = &app.assignment_error_message {
@@ -307,7 +307,7 @@ pub fn courses_screen(app: &App) -> Container<Message> {
                 .align_x(Alignment::Start)
                 .push(Text::new(detail_modal_title).size(22))
                 .push(Container::new(Scrollable::new(content_specific_to_type)).padding(5).style(move |_| bordered_box(&app.theme.target())))
-                .push(Rule::horizontal(10));
+                .push(rule::horizontal(10.0));
 
             if let Some(error_msg) = &app.assignment_edit_error_message {
                 detail_modal_col = detail_modal_col.push(Text::new(error_msg).size(16));

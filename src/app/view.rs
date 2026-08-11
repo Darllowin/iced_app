@@ -5,7 +5,7 @@ use crate::screens::{
     payment_screen, profile_screen, register_screen, settings_screen, user_list_screen,
 };
 use iced::widget::{Column, Container, Row};
-use iced::{Element, Length};
+use iced::Length;
 
 impl App {
     pub fn view(&self) -> Row<Message> {

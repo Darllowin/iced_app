@@ -3,7 +3,7 @@ use crate::app::update::icon_button_content;
 use crate::app::{App, Message};
 use iced::widget::container::{background, bordered_box};
 use iced::widget::image::Handle;
-use iced::widget::{Image, PickList, Rule, button, horizontal_space, image, pick_list, row, text};
+use iced::widget::{PickList, rule, button, image, pick_list, row, text, Space};
 use iced::{
     Alignment, Color, ContentFit, Length, Theme,
     widget::{Button, Column, Container, Row, Scrollable, Stack, Text, TextInput, mouse_area},
@@ -33,9 +33,9 @@ fn headerbar<'a>(group: &Group, app: &'a App) -> Row<'a, Message> {
             )),
         ]
         .spacing(10),
-        horizontal_space(),
+        Space::new().width(Length::Fill),
         text(format!("{}", group.name)).size(26),
-        horizontal_space(),
+        Space::new().width(Length::Fill),
         button(fa_icon_solid("xmark").style(move |_| text::base(&app.theme.target())))
             .on_press(Message::DeleteGroup(group.id)),
     ]
@@ -202,7 +202,7 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                                     student.birthday.clone()
                                 ))),
                         )
-                        .push(horizontal_space())
+                        .push(Space::new().width(Length::Fill))
                         .push(
                             button(
                                 fa_icon_solid("xmark")
@@ -255,7 +255,7 @@ pub fn groups_screen(app: &App) -> Container<Message> {
                 .align_x(Alignment::Start)
                 .push(Text::new(modal_title_text).size(22))
                 .push(scrollable_students)
-                .push(Rule::horizontal(10))
+                .push(rule::horizontal(10.0))
                 .push(add_student_row) // Добавляем строку для добавления студента
                 .push(
                     Text::new(app.group_error_message.clone().unwrap_or_default())
@@ -557,7 +557,7 @@ pub fn groups_screen(app: &App) -> Container<Message> {
             lessons_col = lessons_col.push(Text::new("Нет доступных занятий.").size(16));
         }
 
-        lessons_col = lessons_col.push(Rule::horizontal(10));
+        lessons_col = lessons_col.push(rule::horizontal(10.0));
 
         if !app.group_lessons_modal_past_sessions.is_empty() {
             lessons_col = lessons_col.push(

@@ -1,4 +1,4 @@
-use iced::{widget::{column, text, text_input, button, vertical_space, Container}, Length, Center};
+use iced::{widget::{column, text, text_input, button, Space, Container}, Length, Center};
 use iced::widget::{row, Text};
 use iced_aw::{date_picker};
 use iced_font_awesome::fa_icon_solid;
@@ -27,7 +27,7 @@ pub fn register_screen(app: &App) -> Container<Message> {
             .padding(10)
             .size(18)
             .width(Length::Fixed(350.0)),
-        vertical_space(),
+        Space::new().height(15),
         row![
             text_input("Date", &app.date.to_string())
                 .on_input(Message::Er)
@@ -43,7 +43,7 @@ pub fn register_screen(app: &App) -> Container<Message> {
             .padding(10)
             .size(18)
             .width(Length::Fixed(350.0)),
-        vertical_space(),
+        Space::new().height(15),
         text_input("Пароль", &app.user_password)
             .on_input(Message::PasswordChanged)
             .padding(10)
@@ -56,7 +56,7 @@ pub fn register_screen(app: &App) -> Container<Message> {
             .size(18)
             .secure(true)
             .width(Length::Fixed(350.0)),
-        vertical_space(),
+        Space::new().height(15),
         if let Some(err) = &app.register_error {
             Text::new(err)
                 .size(16)
@@ -67,7 +67,7 @@ pub fn register_screen(app: &App) -> Container<Message> {
             fa_icon_solid("id-card").style(move |_| text::base(&app.theme.target())),
             "Зарегистрироваться"
         )).on_press(Message::RegisterPressed).padding(10),
-        vertical_space(),
+        Space::new().height(15),
         button(icon_button_content(
             fa_icon_solid("arrow-left").style(move |_| text::base(&app.theme.target())),
             "Назад ко входу"

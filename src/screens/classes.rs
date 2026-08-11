@@ -1,5 +1,5 @@
 use iced::{Color, Alignment, Length, Theme, Element, Renderer};
-use iced::widget::{Column, Container, Row, Text, Button, PickList, Scrollable, horizontal_space, text, Stack, Checkbox};
+use iced::widget::{Column, Container, Row, Text, Button, PickList, Scrollable, text, Stack, Space, Checkbox};
 use iced::widget::container::{background, bordered_box};
 use crate::app::{App, Message};
 
@@ -62,7 +62,7 @@ pub fn classes_screen(app: &App) -> Container<Message> {
                         .width(Length::FillPortion(10))
                         .size(20)
                     )
-                    .push(horizontal_space());
+                    .push(Space::new().width(Length::Fill));
 
                 // Определяем, какая кнопка или текст будет отображаться
                 let conduct_button_or_text =
@@ -104,7 +104,7 @@ pub fn classes_screen(app: &App) -> Container<Message> {
                 } else {
                     // Если заданий нет, уже отобразили текст "Нет заданий..." в conduct_button_or_text
                     // Можно добавить пустой спейсер, если нужен отступ
-                    lesson_card_content = lesson_card_content.push(horizontal_space().height(Length::Fixed(5.0)));
+                            lesson_card_content = lesson_card_content.push(Space::new().height(Length::Fixed(5.0)));
                 }
 
                 // Добавляем готовую карточку урока (заголовок + задания) в основной список уроков
@@ -177,9 +177,9 @@ pub fn classes_screen(app: &App) -> Container<Message> {
                                                         .spacing(10)
                                                         .align_y(Alignment::Center)
                                                         .push(Checkbox::new(
-                                                            format!("{}", student.name),
                                                             student.present,
                                                         )
+                                                            .label(format!("{}", student.name))
                                                             .on_toggle(move |_is_checked| Message::ToggleStudentAttendance(student.id))
                                                         )
                                                         .into() // Преобразуем Row в Element
